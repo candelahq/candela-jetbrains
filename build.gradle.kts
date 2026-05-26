@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "com.candelahq"
-version = "0.1.0"
+version = "0.1.1"
 
 repositories {
     mavenCentral()
@@ -33,7 +33,7 @@ kotlin {
 intellijPlatform {
     pluginConfiguration {
         id = "com.candelahq.candela"
-        name = "Candela — LLM Cost Tracker"
+        name = "Candela - LLM Cost Tracker"
         version = project.version.toString()
         description = """
             Real-time LLM cost tracking, budget warnings, and observability for Candela.
