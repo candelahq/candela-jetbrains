@@ -41,6 +41,7 @@ jobs:
 
       - name: Publish to JetBrains Marketplace
         if: steps.check_token.outputs.has_token == 'true'
+        continue-on-error: true
         run: ./gradlew publishPlugin
         env:
           JETBRAINS_TOKEN: ${{ secrets.JETBRAINS_TOKEN }}
