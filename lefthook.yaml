@@ -1,0 +1,59 @@
+# Lefthook — git hooks for Candela JetBrains
+# https://github.com/evilmartians/lefthook
+
+pre-commit:
+  parallel: true
+  commands:
+    trailing-whitespace:
+      glob: "*.{kt,kts,xml,yaml,yml,json,md,properties}"
+      run: "grep -rn '[[:blank:]]$' {staged_files} && exit 1 || exit 0"
+
+    detect-private-key:
+      glob: "*"
+      exclude: "lefthook.yaml"
+      run: "grep -rn -- '-----BEGIN.*KEY-----' {staged_files} && exit 1 || exit 0"
+
+    check-merge-conflict:
+      glob: "*"
+      run: "grep -rn '^<<<<<<< ' {staged_files} && exit 1 || exit 0"
+
+    check-json:
+      glob: "*.json"
+      run: "for f in {staged_files}; do python3 -m json.tool \"$f\" > /dev/null || exit 1; done"
+
+    end-of-file-fixer:
+      glob: "*.{kt,kts,xml,yaml,yml,json,md,properties}"
+      run: |
+        fail=0
+        for f in {staged_files}; do
+          if [ -s "$f" ] && [ "$(tail -c1 "$f" | xxd -p)" != "0a" ]; then
+            echo "No newline at end of: $f"
+            fail=1
+          fi
+        done
+        exit $fail
+
+    kotlin-format:
+      glob: "*.{kt,kts}"
+      run: ./gradlew ktlintCheck 2>/dev/null || true
+
+pre-push:
+  commands:
+    gradle-build:
+      run: ./gradlew buildPlugin
+
+    # Block tag pushes if build.gradle.kts version doesn't match the tag.
+    tag-version-check:
+      run: |
+        TAG=$(git tag --points-at HEAD 2>/dev/null | grep '^v[0-9]' | head -1)
+        if [ -z "$TAG" ]; then
+          exit 0
+        fi
+        TAG_VERSION="${TAG#v}"
+        GRADLE_VERSION=$(grep '^version' build.gradle.kts | head -1 | sed 's/.*"\(.*\)"/\1/')
+        if [ "$TAG_VERSION" != "$GRADLE_VERSION" ]; then
+          echo "❌ Tag ${TAG} does not match build.gradle.kts version ${GRADLE_VERSION}"
+          echo "   Update build.gradle.kts: version = \"${TAG_VERSION}\""
+          exit 1
+        fi
+        echo "✅ Tag ${TAG} matches build.gradle.kts"

@@ -17,7 +17,6 @@ repositories {
 dependencies {
     intellijPlatform {
         intellijIdeaCommunity("2024.3")
-        instrumentationTools()
         pluginVerifier()
     }
 
@@ -38,14 +37,14 @@ intellijPlatform {
         version = project.version.toString()
         description = """
             Real-time LLM cost tracking, budget warnings, and observability for Candela.
-            
+
             <ul>
               <li><b>Status bar widget</b> — live token counts and spend</li>
               <li><b>Budget warnings</b> — notifications when approaching daily limits</li>
               <li><b>Grant display</b> — active bonus grants with expiry countdowns</li>
               <li><b>Dashboard launcher</b> — open the Candela web dashboard</li>
             </ul>
-            
+
             Works with any JetBrains IDE: IntelliJ IDEA, WebStorm, PyCharm, GoLand, etc.
             Requires a local <a href="https://github.com/candelahq/candela">Candela</a> instance.
         """.trimIndent()

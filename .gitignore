@@ -1,6 +1,31 @@
+# Build artifacts
 .gradle/
 build/
+out/
+
+# IDE
 .idea/
 *.iml
-out/
+
+# Gradle
 local.properties
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Nix
+result
+result-*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# AI tools
+.opencode.json
+opencode.json
+
+# Plugin distribution (built locally)
+*.zip
