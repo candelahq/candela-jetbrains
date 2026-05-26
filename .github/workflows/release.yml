@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build plugin
+        run: ./gradlew buildPlugin
+
+      - name: Run tests
+        run: ./gradlew test
+
+      - name: Check JETBRAINS_TOKEN is set
+        id: check_token
+        run: |
+          if [ -z "$JETBRAINS_TOKEN" ]; then
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::JETBRAINS_TOKEN not set — skipping Marketplace publish. Plugin zip will be uploaded to GitHub Release only."
+          else
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          JETBRAINS_TOKEN: ${{ secrets.JETBRAINS_TOKEN }}
+
+      - name: Publish to JetBrains Marketplace
+        if: steps.check_token.outputs.has_token == 'true'
+        run: ./gradlew publishPlugin
+        env:
+          JETBRAINS_TOKEN: ${{ secrets.JETBRAINS_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: build/distributions/*.zip

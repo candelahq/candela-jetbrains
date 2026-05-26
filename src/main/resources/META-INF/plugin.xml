@@ -1,0 +1,57 @@
+<idea-plugin>
+    <id>com.candelahq.candela</id>
+    <name>Candela — LLM Cost Tracker</name>
+    <vendor email="austin@apache.org" url="https://candelahq.com">Candela HQ</vendor>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Status bar widget -->
+        <statusBarWidgetFactory
+                id="CandelaStatusBar"
+                implementation="com.candelahq.candela.CandleStatusBarWidgetFactory"
+                order="after encodingWidget"/>
+
+        <!-- Persistent settings -->
+        <applicationConfigurable
+                parentId="tools"
+                instance="com.candelahq.candela.settings.CandleSettingsConfigurable"
+                id="com.candelahq.candela.settings"
+                displayName="Candela"/>
+
+        <applicationService
+                serviceImplementation="com.candelahq.candela.settings.CandleSettings"/>
+
+        <!-- Startup activity to check health -->
+        <postStartupActivity
+                implementation="com.candelahq.candela.CandleStartupActivity"/>
+
+        <!-- Notification group -->
+        <notificationGroup
+                id="Candela"
+                displayType="BALLOON"
+                toolWindowId="Candela"/>
+    </extensions>
+
+    <actions>
+        <group id="Candela.Menu" text="Candela" popup="true">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <action id="Candela.ShowCostSummary"
+                    class="com.candelahq.candela.actions.ShowCostSummaryAction"
+                    text="Show Cost Summary"
+                    description="Show today's LLM cost breakdown"/>
+            <action id="Candela.CheckBudget"
+                    class="com.candelahq.candela.actions.CheckBudgetAction"
+                    text="Check Budget"
+                    description="Check daily budget and active grants"/>
+            <action id="Candela.OpenDashboard"
+                    class="com.candelahq.candela.actions.OpenDashboardAction"
+                    text="Open Dashboard"
+                    description="Open the Candela web dashboard"/>
+            <action id="Candela.RefreshStatus"
+                    class="com.candelahq.candela.actions.RefreshStatusAction"
+                    text="Refresh Status"
+                    description="Force refresh status bar data"/>
+        </group>
+    </actions>
+</idea-plugin>
