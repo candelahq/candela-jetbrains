@@ -40,7 +40,7 @@ pre-commit:
 pre-push:
   commands:
     gradle-build:
-      run: ./gradlew buildPlugin
+      run: nix develop -c ./gradlew buildPlugin
 
     # Block tag pushes if build.gradle.kts version doesn't match the tag.
     tag-version-check:
