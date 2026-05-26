@@ -51,22 +51,27 @@ Configure under **Settings → Tools → Candela**:
 
 ## Installation
 
-### From JetBrains Marketplace (Coming Soon)
+### From GitHub Releases (recommended)
 
-Search for **"Candela"** in **Settings → Plugins → Marketplace**.
+1. Go to the [latest release](https://github.com/candelahq/candela-jetbrains/releases/latest)
+2. Download **`candela-jetbrains-x.x.x.zip`**
+3. In your JetBrains IDE, open **Settings → Plugins**
+4. Click the **⚙️ gear icon** → **Install Plugin from Disk…**
+5. Select the downloaded `.zip` file
+6. Click **OK** and **Restart IDE**
 
-### From GitHub Releases
-
-Download the `.zip` from [Releases](https://github.com/candelahq/candela-jetbrains/releases) and install:
-
-**Settings → Plugins → ⚙️ → Install Plugin from Disk…**
+> **Note:** The plugin is pending review on the JetBrains Marketplace. Once approved, you'll be able to install directly from **Settings → Plugins → Marketplace** by searching for "Candela".
 
 ### Build from Source
 
 ```bash
-./gradlew buildPlugin
-# Output: build/distributions/candela-jetbrains-0.1.0.zip
+git clone https://github.com/candelahq/candela-jetbrains.git
+cd candela-jetbrains
+nix develop              # enters dev shell with JDK 21 + Gradle
+./gradlew buildPlugin    # output: build/distributions/candela-jetbrains-*.zip
 ```
+
+Then install the `.zip` from disk using the steps above.
 
 ---
 
@@ -81,18 +86,19 @@ Download the `.zip` from [Releases](https://github.com/candelahq/candela-jetbrai
 ## Development
 
 ```bash
+# Enter dev shell (JDK 21 + Gradle 8.14 + Kotlin)
+nix develop
+
 # Run a sandboxed IDE with the plugin loaded
-./gradlew runIde
+nix develop -c ./gradlew runIde
 
 # Build the distribution zip
-./gradlew buildPlugin
+nix develop -c ./gradlew buildPlugin
 
 # Run tests
-./gradlew test
-
-# Verify plugin compatibility
-./gradlew verifyPlugin
+nix develop -c ./gradlew test
 ```
+
 
 ---
 
