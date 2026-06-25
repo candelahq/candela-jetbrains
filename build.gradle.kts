@@ -2,6 +2,7 @@ plugins {
     id("java")
     id("org.jetbrains.kotlin.jvm") version "2.1.20"
     id("org.jetbrains.intellij.platform") version "2.6.0"
+    id("org.jlleitschuh.gradle.ktlint") version "12.2.0"
 }
 
 group = "com.candelahq"
@@ -30,12 +31,17 @@ kotlin {
     jvmToolchain(21)
 }
 
+ktlint {
+    version.set("1.6.0")
+}
+
 intellijPlatform {
     pluginConfiguration {
         id = "com.candelahq.candela"
         name = "Candela - LLM Cost Tracker"
         version = project.version.toString()
-        description = """
+        description =
+            """
             Real-time LLM cost tracking, budget warnings, and observability for Candela.
 
             <ul>
@@ -47,7 +53,7 @@ intellijPlatform {
 
             Works with any JetBrains IDE: IntelliJ IDEA, WebStorm, PyCharm, GoLand, etc.
             Requires a local <a href="https://github.com/candelahq/candela">Candela</a> instance.
-        """.trimIndent()
+            """.trimIndent()
         vendor {
             name = "Candela HQ"
             url = "https://candelahq.com"
@@ -57,7 +63,8 @@ intellijPlatform {
             sinceBuild = "243"
             untilBuild = provider { null }
         }
-        changeNotes = """
+        changeNotes =
+            """
             <h3>0.1.0</h3>
             <ul>
               <li>Initial release</li>
@@ -65,7 +72,7 @@ intellijPlatform {
               <li>Budget warnings and grant display</li>
               <li>Dashboard launcher action</li>
             </ul>
-        """.trimIndent()
+            """.trimIndent()
     }
 
     pluginVerification {

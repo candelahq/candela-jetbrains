@@ -20,9 +20,11 @@ class CandelaClient(
     private val cacheTtlMs: Long = 0,
 ) {
     private val baseUrl = baseUrl.trimEnd('/')
-    private val http = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(2))
-        .build()
+    private val http =
+        HttpClient
+            .newBuilder()
+            .connectTimeout(Duration.ofSeconds(2))
+            .build()
     private val gson = Gson()
 
     @Volatile
@@ -31,18 +33,23 @@ class CandelaClient(
     @Volatile
     private var cache: CacheEntry? = null
 
-    private data class CacheEntry(val data: DashboardData, val fetchedAt: Long)
+    private data class CacheEntry(
+        val data: DashboardData,
+        val fetchedAt: Long,
+    )
 
     // ── Health ────────────────────────────────────────────────────────────
 
     fun isAlive(): Boolean {
         alive?.let { if (it) return true }
         return try {
-            val req = HttpRequest.newBuilder()
-                .uri(URI.create("$baseUrl/healthz"))
-                .timeout(Duration.ofSeconds(2))
-                .GET()
-                .build()
+            val req =
+                HttpRequest
+                    .newBuilder()
+                    .uri(URI.create("$baseUrl/healthz"))
+                    .timeout(Duration.ofSeconds(2))
+                    .GET()
+                    .build()
             val res = http.send(req, HttpResponse.BodyHandlers.ofString())
             (res.statusCode() in 200..299).also { alive = it }
         } catch (_: Exception) {
@@ -79,9 +86,10 @@ class CandelaClient(
 
     private fun tryGetDashboardData(hours: Int): DashboardData? {
         return try {
-            val body = buildTimeRangeBody(hours).apply {
-                addProperty("include_budget", true)
-            }
+            val body =
+                buildTimeRangeBody(hours).apply {
+                    addProperty("include_budget", true)
+                }
             val res = postRpc("candela.v1.DashboardService/GetDashboardData", body)
             if (res.statusCode() == 404 || res.statusCode() == 501) return null
             if (res.statusCode() !in 200..299) return null
@@ -93,19 +101,21 @@ class CandelaClient(
         }
     }
 
-    private fun legacyFanout(hours: Int): DashboardData? {
-        return try {
+    private fun legacyFanout(hours: Int): DashboardData? =
+        try {
             val timeRange = buildTimeRangeBody(hours)
 
             // Fan out two requests
-            val summaryFuture = http.sendAsync(
-                buildRpcRequest("candela.v1.DashboardService/GetUsageSummary", timeRange),
-                HttpResponse.BodyHandlers.ofString()
-            )
-            val budgetFuture = http.sendAsync(
-                buildRpcRequest("candela.v1.UserService/GetMyBudget", JsonObject()),
-                HttpResponse.BodyHandlers.ofString()
-            )
+            val summaryFuture =
+                http.sendAsync(
+                    buildRpcRequest("candela.v1.DashboardService/GetUsageSummary", timeRange),
+                    HttpResponse.BodyHandlers.ofString(),
+                )
+            val budgetFuture =
+                http.sendAsync(
+                    buildRpcRequest("candela.v1.UserService/GetMyBudget", JsonObject()),
+                    HttpResponse.BodyHandlers.ofString(),
+                )
 
             var usage = UsageSummary()
             val summaryRes = summaryFuture.join()
@@ -131,7 +141,6 @@ class CandelaClient(
         } catch (_: Exception) {
             null
         }
-    }
 
     // ── Parsing ───────────────────────────────────────────────────────────
 
@@ -140,19 +149,20 @@ class CandelaClient(
         val usage = parseUsageSummary(s)
 
         val modelsArray = json.getAsJsonArray("models")
-        val models = modelsArray?.mapNotNull { el ->
-            val m = el.asJsonObject
-            ModelUsage(
-                model = m.str("model"),
-                provider = m.str("provider"),
-                inputTokens = m.long("inputTokens", "input_tokens"),
-                outputTokens = m.long("outputTokens", "output_tokens"),
-                totalCostUsd = m.dbl("costUsd", "cost_usd"),
-                requestCount = m.int("callCount", "call_count"),
-                cacheReadTokens = m.long("cacheReadTokens", "cache_read_tokens"),
-                cacheCreationTokens = m.long("cacheCreationTokens", "cache_creation_tokens"),
-            )
-        } ?: emptyList()
+        val models =
+            modelsArray?.mapNotNull { el ->
+                val m = el.asJsonObject
+                ModelUsage(
+                    model = m.str("model"),
+                    provider = m.str("provider"),
+                    inputTokens = m.long("inputTokens", "input_tokens"),
+                    outputTokens = m.long("outputTokens", "output_tokens"),
+                    totalCostUsd = m.dbl("costUsd", "cost_usd"),
+                    requestCount = m.int("callCount", "call_count"),
+                    cacheReadTokens = m.long("cacheReadTokens", "cache_read_tokens"),
+                    cacheCreationTokens = m.long("cacheCreationTokens", "cache_creation_tokens"),
+                )
+            } ?: emptyList()
 
         val bc = json.getAsJsonObject("budgetContext") ?: json.getAsJsonObject("budget_context")
         var budget: BudgetInfo? = null
@@ -189,9 +199,14 @@ class CandelaClient(
         val remaining = maxOf(0.0, limitUsd - spentUsd)
         val fraction = if (limitUsd > 0) minOf(1.0, spentUsd / limitUsd) else 0.0
         val periodEndRaw = raw.str("periodEnd", "period_end")
-        val periodEnd = periodEndRaw.takeIf { it.isNotEmpty() }?.let {
-            try { Instant.parse(it) } catch (_: Exception) { null }
-        }
+        val periodEnd =
+            periodEndRaw.takeIf { it.isNotEmpty() }?.let {
+                try {
+                    Instant.parse(it)
+                } catch (_: Exception) {
+                    null
+                }
+            }
         return BudgetInfo(
             limitUsd = limitUsd,
             spentUsd = spentUsd,
@@ -211,9 +226,14 @@ class CandelaClient(
             val amountUsd = g.dbl("amountUsd", "amount_usd")
             val spentUsd = g.dbl("spentUsd", "spent_usd")
             val expiresRaw = g.str("expiresAt", "expires_at")
-            val expiresAt = expiresRaw.takeIf { it.isNotEmpty() }?.let {
-                try { Instant.parse(it) } catch (_: Exception) { null }
-            }
+            val expiresAt =
+                expiresRaw.takeIf { it.isNotEmpty() }?.let {
+                    try {
+                        Instant.parse(it)
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
             GrantInfo(
                 id = g.str("id"),
                 amountUsd = amountUsd,
@@ -221,7 +241,8 @@ class CandelaClient(
                 remainingUsd = maxOf(0.0, amountUsd - spentUsd),
                 reason = g.str("reason"),
                 expiresAt = expiresAt,
-                isExpiringSoon = expiresAt != null &&
+                isExpiringSoon =
+                    expiresAt != null &&
                         expiresAt.isAfter(Instant.now()) &&
                         Duration.between(Instant.now(), expiresAt).toDays() < 7,
                 isExhausted = spentUsd >= amountUsd,
@@ -235,29 +256,44 @@ class CandelaClient(
         val now = Instant.now()
         val start = now.minusSeconds(hours * 3600L)
         return JsonObject().apply {
-            add("time_range", JsonObject().apply {
-                add("start", JsonObject().apply {
-                    addProperty("seconds", start.epochSecond.toString())
-                    addProperty("nanos", 0)
-                })
-                add("end", JsonObject().apply {
-                    addProperty("seconds", now.epochSecond.toString())
-                    addProperty("nanos", 0)
-                })
-            })
+            add(
+                "time_range",
+                JsonObject().apply {
+                    add(
+                        "start",
+                        JsonObject().apply {
+                            addProperty("seconds", start.epochSecond.toString())
+                            addProperty("nanos", 0)
+                        },
+                    )
+                    add(
+                        "end",
+                        JsonObject().apply {
+                            addProperty("seconds", now.epochSecond.toString())
+                            addProperty("nanos", 0)
+                        },
+                    )
+                },
+            )
         }
     }
 
-    private fun buildRpcRequest(method: String, body: JsonObject): HttpRequest =
-        HttpRequest.newBuilder()
+    private fun buildRpcRequest(
+        method: String,
+        body: JsonObject,
+    ): HttpRequest =
+        HttpRequest
+            .newBuilder()
             .uri(URI.create("$baseUrl/$method"))
             .timeout(Duration.ofSeconds(5))
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(body)))
             .build()
 
-    private fun postRpc(method: String, body: JsonObject): HttpResponse<String> =
-        http.send(buildRpcRequest(method, body), HttpResponse.BodyHandlers.ofString())
+    private fun postRpc(
+        method: String,
+        body: JsonObject,
+    ): HttpResponse<String> = http.send(buildRpcRequest(method, body), HttpResponse.BodyHandlers.ofString())
 
     private fun computeResetLabel(periodEnd: Instant?): String {
         if (periodEnd == null) return ""
@@ -278,6 +314,5 @@ class CandelaClient(
     private fun JsonObject.long(vararg keys: String): Long =
         keys.firstNotNullOfOrNull { get(it)?.takeIf { e -> !e.isJsonNull }?.asLong } ?: 0L
 
-    private fun JsonObject.int(vararg keys: String): Int =
-        keys.firstNotNullOfOrNull { get(it)?.takeIf { e -> !e.isJsonNull }?.asInt } ?: 0
+    private fun JsonObject.int(vararg keys: String): Int = keys.firstNotNullOfOrNull { get(it)?.takeIf { e -> !e.isJsonNull }?.asInt } ?: 0
 }
