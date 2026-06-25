@@ -34,16 +34,25 @@ class CandleStatusBarWidget(
     }
 
     private var statusBar: StatusBar? = null
+
+    @Volatile
     private var currentText = "🕯️ Candela"
+
+    @Volatile
     private var currentTooltip = "Candela — LLM Cost Tracker"
+
+    @Volatile
     private var lastData: DashboardData? = null
 
     private val scheduler =
         Executors.newSingleThreadScheduledExecutor { r ->
             Thread(r, "candela-status-bar").apply { isDaemon = true }
         }
+
+    @Volatile
     private var refreshTask: ScheduledFuture<*>? = null
     private var client: CandelaClient? = null
+    private var activeServerUrl: String = ""
 
     override fun ID(): String = ID
 
@@ -91,7 +100,13 @@ class CandleStatusBarWidget(
         if (intervalSeconds <= 0) return
         refreshTask =
             scheduler.scheduleAtFixedRate(
-                { refresh() },
+                {
+                    try {
+                        refresh()
+                    } catch (_: Throwable) {
+                        // Prevent silent scheduler termination
+                    }
+                },
                 intervalSeconds.toLong(),
                 intervalSeconds.toLong(),
                 TimeUnit.SECONDS,
@@ -99,6 +114,12 @@ class CandleStatusBarWidget(
     }
 
     private fun refresh() {
+        val settings = CandleSettings.getInstance().state
+        val serverUrl = settings.serverUrl
+        if (serverUrl != activeServerUrl) {
+            activeServerUrl = serverUrl
+            client = CandelaClient(serverUrl, cacheTtlMs = 30_000)
+        }
         val data = client?.getDashboardData()
         if (data == null) {
             currentText = "🕯️ offline"
@@ -107,7 +128,13 @@ class CandleStatusBarWidget(
             refreshTask?.cancel(false)
             refreshTask =
                 scheduler.scheduleAtFixedRate(
-                    { refresh() },
+                    {
+                        try {
+                            refresh()
+                        } catch (_: Throwable) {
+                            // Prevent silent scheduler termination
+                        }
+                    },
                     300,
                     300,
                     TimeUnit.SECONDS,
