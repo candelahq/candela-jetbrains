@@ -5,11 +5,14 @@ import com.candelahq.candela.CandleStatusBarWidget
 import com.candelahq.candela.client.CandelaClient
 import com.candelahq.candela.settings.CandleSettings
 import com.intellij.ide.BrowserUtil
+import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.wm.WindowManager
 
 class ShowCostSummaryAction : AnAction() {
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val settings = CandleSettings.getInstance().state
@@ -24,6 +27,8 @@ class ShowCostSummaryAction : AnAction() {
 }
 
 class CheckBudgetAction : AnAction() {
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val settings = CandleSettings.getInstance().state
@@ -40,6 +45,8 @@ class CheckBudgetAction : AnAction() {
 }
 
 class OpenDashboardAction : AnAction() {
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+
     override fun actionPerformed(e: AnActionEvent) {
         val settings = CandleSettings.getInstance().state
         BrowserUtil.browse("${settings.serverUrl}/_local/")
@@ -47,6 +54,8 @@ class OpenDashboardAction : AnAction() {
 }
 
 class RefreshStatusAction : AnAction() {
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val statusBar = WindowManager.getInstance().getStatusBar(project) ?: return
