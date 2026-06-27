@@ -15,6 +15,11 @@ class CandleSettings : PersistentStateComponent<CandleSettings.State> {
         var statusBarEnabled: Boolean = true,
         var autoRefreshIntervalSeconds: Int = 60,
         var budgetWarningThreshold: Int = 80,
+        // Chat settings
+        var chatServerUrl: String = "http://127.0.0.1:1234",
+        var defaultModel: String = "",
+        var systemPrompt: String = "You are a helpful coding assistant working inside a JetBrains IDE.",
+        var maxTokens: Int = 4096,
     )
 
     private var state = State()

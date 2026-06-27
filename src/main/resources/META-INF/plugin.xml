@@ -31,6 +31,14 @@
                 id="Candela"
                 displayType="BALLOON"
                 toolWindowId="Candela"/>
+
+        <!-- Chat tool window -->
+        <toolWindow
+                id="Candela Chat"
+                anchor="right"
+                secondary="true"
+                icon="/icons/candela-13.png"
+                factoryClass="com.candelahq.candela.chat.ChatToolWindowFactory"/>
     </extensions>
 
     <actions>
@@ -52,6 +60,23 @@
                     class="com.candelahq.candela.actions.RefreshStatusAction"
                     text="Refresh Status"
                     description="Force refresh status bar data"/>
+        </group>
+
+        <!-- Editor context menu actions -->
+        <group id="Candela.EditorPopup" text="Candela" popup="true">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <action id="Candela.AskCandela"
+                    class="com.candelahq.candela.actions.AskCandelaAction"
+                    text="Ask Candela..."
+                    description="Ask Candela about selected code"/>
+            <action id="Candela.ExplainCode"
+                    class="com.candelahq.candela.actions.ExplainCodeAction"
+                    text="Explain Code"
+                    description="Explain selected code with Candela"/>
+            <action id="Candela.GenerateTests"
+                    class="com.candelahq.candela.actions.GenerateTestsAction"
+                    text="Generate Tests"
+                    description="Generate tests for selected code with Candela"/>
         </group>
     </actions>
 </idea-plugin>
