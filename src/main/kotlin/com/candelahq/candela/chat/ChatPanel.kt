@@ -3,8 +3,10 @@ package com.candelahq.candela.chat
 import com.candelahq.candela.client.ChatClient
 import com.candelahq.candela.client.ChunkUsage
 import com.candelahq.candela.settings.CandleSettings
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.WriteCommandAction
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.project.Project
@@ -26,8 +28,10 @@ import javax.swing.text.html.HTMLEditorKit
  * - NORTH: toolbar with model selector, refresh, new chat
  * - CENTER: scrollable message area
  * - SOUTH: input area with send/stop button
+ *
+ * Implements [Disposable] to clean up resources when the tool window is closed.
  */
-class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
+class ChatPanel(private val project: Project) : JPanel(BorderLayout()), Disposable {
 
     private val chatClient = ChatClient()
     private val session = ChatSession()
@@ -57,7 +61,16 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     // Track the currently streaming assistant text pane for incremental updates
     private var streamingTextPane: JTextPane? = null
-    private var streamingContent = StringBuilder()
+
+    // Thread-safe buffer for accumulating streaming tokens.
+    // Written on the pooled thread, read on EDT — StringBuffer is synchronized.
+    private var streamingContent = StringBuffer()
+
+    // Throttle UI updates during streaming to avoid O(n²) re-rendering.
+    // Tracks the last time we dispatched an updateStreamingBubble() call to the EDT.
+    private var lastUiUpdateMs = 0L
+
+    private var disposed = false
 
     init {
         buildUI()
@@ -76,6 +89,17 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         }
         inputArea.text = text
         doSend()
+    }
+
+    // ── Disposable ──────────────────────────────────────────────────────
+
+    override fun dispose() {
+        disposed = true
+        if (session.isStreaming) {
+            session.cancelStreaming()
+        }
+        streamingTextPane = null
+        LOG.info("ChatPanel disposed for project: ${project.name}")
     }
 
     // ── UI Construction ──────────────────────────────────────────────────
@@ -159,7 +183,8 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
         // Prepare streaming
         session.startStreaming()
         sendButton.text = "Stop"
-        streamingContent = StringBuilder()
+        streamingContent = StringBuffer()
+        lastUiUpdateMs = 0L
 
         val assistantPane = addAssistantBubble("")
         streamingTextPane = assistantPane
@@ -175,6 +200,8 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             settings.defaultModel = model
         }
 
+        LOG.info("Sending chat request: model=$model, messages=${messages.size}")
+
         ApplicationManager.getApplication().executeOnPooledThread {
             chatClient.streamChat(
                 baseUrl = baseUrl,
@@ -184,30 +211,44 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
                 cancelled = session.cancelled,
                 onToken = { token ->
                     streamingContent.append(token)
-                    SwingUtilities.invokeLater {
-                        updateStreamingBubble(streamingContent.toString())
+                    // Throttle UI updates: render at most every STREAM_THROTTLE_MS
+                    val now = System.currentTimeMillis()
+                    if (now - lastUiUpdateMs >= STREAM_THROTTLE_MS) {
+                        lastUiUpdateMs = now
+                        val snapshot = streamingContent.toString()
+                        SwingUtilities.invokeLater {
+                            if (!disposed) {
+                                updateStreamingBubble(snapshot)
+                            }
+                        }
                     }
                 },
                 onComplete = { usage ->
                     session.stopStreaming()
                     val finalContent = streamingContent.toString()
+                    // addAssistantMessage is now thread-safe via CopyOnWriteArrayList
                     session.addAssistantMessage(finalContent)
                     SwingUtilities.invokeLater {
-                        updateStreamingBubble(finalContent)
-                        addCodeBlockActions(finalContent)
-                        if (usage != null) {
-                            addTokenInfo(usage)
+                        if (!disposed) {
+                            updateStreamingBubble(finalContent)
+                            addCodeBlockActions(finalContent)
+                            if (usage != null) {
+                                addTokenInfo(usage)
+                            }
+                            sendButton.text = "Send"
+                            streamingTextPane = null
                         }
-                        sendButton.text = "Send"
-                        streamingTextPane = null
                     }
                 },
                 onError = { error ->
                     session.stopStreaming()
+                    LOG.warn("Chat stream error", error)
                     SwingUtilities.invokeLater {
-                        addErrorMessage("Error: ${error.message}")
-                        sendButton.text = "Send"
-                        streamingTextPane = null
+                        if (!disposed) {
+                            addErrorMessage("Error: ${error.message ?: "Unknown error"}")
+                            sendButton.text = "Send"
+                            streamingTextPane = null
+                        }
                     }
                 },
             )
@@ -232,6 +273,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             val settings = CandleSettings.getInstance().state
             val models = chatClient.fetchModels(settings.chatServerUrl)
             SwingUtilities.invokeLater {
+                if (disposed) return@invokeLater
                 modelSelector.removeAllItems()
                 for (model in models) {
                     modelSelector.addItem(model.id)
@@ -439,11 +481,11 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     private fun insertAtCursor(code: String) {
         val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return
-        WriteCommandAction.runWriteCommandAction(project) {
+        WriteCommandAction.runWriteCommandAction(project, "Insert from Candela Chat", null, {
             val offset = editor.caretModel.offset
             editor.document.insertString(offset, code)
             editor.caretModel.moveToOffset(offset + code.length)
-        }
+        })
     }
 
     private fun escapeBasicHtml(text: String): String {
@@ -451,5 +493,12 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
             .replace("&", "&amp;")
             .replace("<", "&lt;")
             .replace(">", "&gt;")
+    }
+
+    companion object {
+        private val LOG = Logger.getInstance(ChatPanel::class.java)
+
+        /** Minimum interval between streaming UI updates (milliseconds). */
+        private const val STREAM_THROTTLE_MS = 80L
     }
 }

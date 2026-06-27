@@ -2,16 +2,19 @@ package com.candelahq.candela.chat
 
 import com.candelahq.candela.client.ChatMessage
 import com.candelahq.candela.settings.CandleSettings
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Manages the state of a single chat conversation.
  *
- * Thread-safe for streaming operations via [cancelled] and [isStreaming].
+ * Thread-safe: [_messages] uses [CopyOnWriteArrayList] for safe concurrent
+ * access between EDT and background threads. Streaming state is managed
+ * via [cancelled] (AtomicBoolean) and volatile [isStreaming].
  */
 class ChatSession {
 
-    private val _messages = mutableListOf<ChatMessage>()
+    private val _messages = CopyOnWriteArrayList<ChatMessage>()
 
     /** Immutable snapshot of the conversation history (excludes system prompt). */
     val messages: List<ChatMessage> get() = _messages.toList()
