@@ -5,11 +5,14 @@ import com.candelahq.candela.CandleStatusBarWidget
 import com.candelahq.candela.client.CandelaClient
 import com.candelahq.candela.settings.CandleSettings
 import com.intellij.ide.BrowserUtil
+import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.wm.WindowManager
 
 class ShowCostSummaryAction : AnAction() {
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val settings = CandleSettings.getInstance().state
@@ -24,6 +27,8 @@ class ShowCostSummaryAction : AnAction() {
 }
 
 class CheckBudgetAction : AnAction() {
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val settings = CandleSettings.getInstance().state
@@ -40,6 +45,8 @@ class CheckBudgetAction : AnAction() {
 }
 
 class OpenDashboardAction : AnAction() {
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+
     override fun actionPerformed(e: AnActionEvent) {
         val settings = CandleSettings.getInstance().state
         BrowserUtil.browse("${settings.serverUrl}/_local/")
@@ -47,10 +54,31 @@ class OpenDashboardAction : AnAction() {
 }
 
 class RefreshStatusAction : AnAction() {
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val statusBar = WindowManager.getInstance().getStatusBar(project) ?: return
         val widget = statusBar.getWidget(CandleStatusBarWidget.ID) as? CandleStatusBarWidget
         widget?.forceRefresh()
     }
+}
+
+/**
+ * Build a fenced code block that safely handles code containing backticks.
+ *
+ * If the code contains triple backticks, the fence uses more backticks
+ * (e.g. ``````) to avoid premature closing.
+ */
+fun buildCodeFence(
+    code: String,
+    lang: String = "",
+): String {
+    var fenceLength = 3
+    val backtickRun = Regex("`{3,}")
+    for (match in backtickRun.findAll(code)) {
+        fenceLength = maxOf(fenceLength, match.value.length + 1)
+    }
+    val fence = "`".repeat(fenceLength)
+    return "$fence$lang\n$code\n$fence"
 }

@@ -1,0 +1,559 @@
+package com.candelahq.candela.chat
+
+import com.candelahq.candela.client.ChatClient
+import com.candelahq.candela.client.ChunkUsage
+import com.candelahq.candela.settings.CandleSettings
+import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.command.WriteCommandAction
+import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.ide.CopyPasteManager
+import com.intellij.openapi.project.Project
+import com.intellij.ui.JBColor
+import com.intellij.ui.components.JBScrollPane
+import com.intellij.ui.components.JBTextArea
+import com.intellij.util.ui.JBUI
+import java.awt.BorderLayout
+import java.awt.Component
+import java.awt.Cursor
+import java.awt.Dimension
+import java.awt.FlowLayout
+import java.awt.Font
+import java.awt.datatransfer.StringSelection
+import java.awt.event.KeyAdapter
+import java.awt.event.KeyEvent
+import java.util.concurrent.atomic.AtomicLong
+import javax.swing.BorderFactory
+import javax.swing.BoxLayout
+import javax.swing.JButton
+import javax.swing.JComboBox
+import javax.swing.JLabel
+import javax.swing.JPanel
+import javax.swing.JTextPane
+import javax.swing.ScrollPaneConstants
+import javax.swing.SwingConstants
+import javax.swing.SwingUtilities
+import javax.swing.text.html.HTMLEditorKit
+
+/**
+ * Main chat UI panel for the Candela Chat tool window.
+ *
+ * Layout:
+ * - NORTH: toolbar with model selector, refresh, new chat
+ * - CENTER: scrollable message area
+ * - SOUTH: input area with send/stop button
+ *
+ * Implements [Disposable] to clean up resources when the tool window is closed.
+ */
+class ChatPanel(
+    private val project: Project,
+) : JPanel(BorderLayout()),
+    Disposable {
+    private val chatClient = ChatClient()
+    private val session = ChatSession()
+
+    // ── UI Components ────────────────────────────────────────────────────
+
+    private val modelSelector = JComboBox<String>()
+    private val messagesPanel =
+        JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            background = JBColor.PanelBackground
+        }
+    private val messagesScroll =
+        JBScrollPane(messagesPanel).apply {
+            border = JBUI.Borders.empty()
+            verticalScrollBarPolicy = ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED
+            horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
+        }
+    private val inputArea =
+        JBTextArea(3, 40).apply {
+            lineWrap = true
+            wrapStyleWord = true
+            border = JBUI.Borders.empty(8)
+            font = Font("JetBrains Mono", Font.PLAIN, 13)
+            background = MarkdownRenderer.inputAreaBg()
+        }
+    private val sendButton =
+        JButton("Send").apply {
+            isFocusPainted = false
+        }
+
+    // Track the currently streaming assistant text pane for incremental updates
+    private var streamingTextPane: JTextPane? = null
+
+    // Thread-safe buffer for accumulating streaming tokens.
+    // Written on the pooled thread, read on EDT — StringBuffer is synchronized.
+    @Volatile
+    private var streamingContent = StringBuffer()
+
+    // Throttle UI updates during streaming to avoid O(n²) re-rendering.
+    // Tracks the last time we dispatched an updateStreamingBubble() call to the EDT.
+    private val lastUiUpdateMs = AtomicLong(0L)
+
+    private var disposed = false
+
+    init {
+        buildUI()
+        loadModels()
+    }
+
+    // ── Public API (used by editor actions) ──────────────────────────────
+
+    /**
+     * Send a message to the chat (used by editor context actions).
+     * If a stream is in progress, it will be cancelled first.
+     */
+    fun sendMessage(text: String) {
+        if (session.isStreaming) {
+            session.cancelStreaming()
+        }
+        inputArea.text = text
+        doSend()
+    }
+
+    // ── Disposable ──────────────────────────────────────────────────────
+
+    override fun dispose() {
+        disposed = true
+        if (session.isStreaming) {
+            session.cancelStreaming()
+        }
+        streamingTextPane = null
+        ChatPanelService.getInstance(project).panel = null
+        log.info("ChatPanel disposed for project: ${project.name}")
+    }
+
+    // ── UI Construction ──────────────────────────────────────────────────
+
+    private fun buildUI() {
+        // Toolbar (NORTH)
+        val toolbar =
+            JPanel(FlowLayout(FlowLayout.LEFT, 4, 2)).apply {
+                background = MarkdownRenderer.toolbarBg()
+                border = JBUI.Borders.customLine(JBColor.border(), 0, 0, 1, 0)
+            }
+
+        modelSelector.preferredSize = Dimension(220, 28)
+        modelSelector.toolTipText = "Select LLM model"
+        toolbar.add(JLabel("Model:"))
+        toolbar.add(modelSelector)
+
+        val refreshBtn =
+            JButton("↻").apply {
+                toolTipText = "Refresh models"
+                isFocusPainted = false
+                addActionListener { loadModels() }
+            }
+        toolbar.add(refreshBtn)
+
+        val newChatBtn =
+            JButton("New Chat").apply {
+                toolTipText = "Clear conversation"
+                isFocusPainted = false
+                addActionListener { clearChat() }
+            }
+        toolbar.add(newChatBtn)
+
+        add(toolbar, BorderLayout.NORTH)
+
+        // Messages area (CENTER)
+        add(messagesScroll, BorderLayout.CENTER)
+
+        // Input area (SOUTH)
+        val inputPanel =
+            JPanel(BorderLayout()).apply {
+                border = JBUI.Borders.customLine(JBColor.border(), 1, 0, 0, 0)
+            }
+
+        inputArea.addKeyListener(
+            object : KeyAdapter() {
+                override fun keyPressed(e: KeyEvent) {
+                    if (e.keyCode == KeyEvent.VK_ENTER && !e.isShiftDown) {
+                        e.consume()
+                        doSend()
+                    }
+                }
+            },
+        )
+
+        sendButton.addActionListener { doSend() }
+
+        val inputScroll =
+            JBScrollPane(inputArea).apply {
+                border = JBUI.Borders.empty()
+                preferredSize = Dimension(0, 72)
+            }
+        inputPanel.add(inputScroll, BorderLayout.CENTER)
+        inputPanel.add(sendButton, BorderLayout.EAST)
+
+        add(inputPanel, BorderLayout.SOUTH)
+
+        // Welcome message
+        addInfoMessage("Welcome to Candela Chat. Select a model and start chatting.")
+    }
+
+    // ── Actions ──────────────────────────────────────────────────────────
+
+    private fun doSend() {
+        if (session.isStreaming) {
+            // Button is in "Stop" mode
+            session.cancelStreaming()
+            sendButton.text = "Send"
+            return
+        }
+
+        val text = inputArea.text.trim()
+        if (text.isEmpty()) return
+
+        val model = modelSelector.selectedItem as? String ?: ""
+        if (model.isEmpty() || model.startsWith("(")) {
+            addErrorMessage("No valid model selected. Please check your connection and refresh.")
+            return
+        }
+
+        inputArea.text = ""
+        session.addUserMessage(text)
+        addUserBubble(text)
+
+        // Prepare streaming
+        session.startStreaming()
+        sendButton.text = "Stop"
+        streamingContent = StringBuffer()
+        lastUiUpdateMs.set(0L)
+
+        val assistantPane = addAssistantBubble("")
+        streamingTextPane = assistantPane
+
+        val settings = CandleSettings.getInstance().state
+        val baseUrl = settings.chatServerUrl
+        val messages = session.buildRequestMessages()
+        val maxTokens = settings.maxTokens
+
+        // Save model selection
+        settings.defaultModel = model
+
+        log.info("Sending chat request: model=$model, messages=${messages.size}")
+
+        ApplicationManager.getApplication().executeOnPooledThread {
+            chatClient.streamChat(
+                baseUrl = baseUrl,
+                model = model,
+                messages = messages,
+                maxTokens = maxTokens,
+                cancelled = session.cancelled,
+                onToken = { token ->
+                    streamingContent.append(token)
+                    // Throttle UI updates: render at most every STREAM_THROTTLE_MS
+                    val now = System.currentTimeMillis()
+                    if (now - lastUiUpdateMs.get() >= STREAM_THROTTLE_MS) {
+                        lastUiUpdateMs.set(now)
+                        val snapshot = streamingContent.toString()
+                        SwingUtilities.invokeLater {
+                            if (!disposed) {
+                                updateStreamingBubble(snapshot)
+                            }
+                        }
+                    }
+                },
+                onComplete = { usage ->
+                    session.stopStreaming()
+                    val finalContent = streamingContent.toString()
+                    // addAssistantMessage is now thread-safe via CopyOnWriteArrayList
+                    session.addAssistantMessage(finalContent)
+                    SwingUtilities.invokeLater {
+                        if (!disposed) {
+                            updateStreamingBubble(finalContent)
+                            addCodeBlockActions(finalContent)
+                            if (usage != null) {
+                                addTokenInfo(usage)
+                            }
+                            sendButton.text = "Send"
+                            streamingTextPane = null
+                        }
+                    }
+                },
+                onError = { error ->
+                    session.stopStreaming()
+                    log.warn("Chat stream error", error)
+                    SwingUtilities.invokeLater {
+                        if (!disposed) {
+                            addErrorMessage("Error: ${error.message ?: "Unknown error"}")
+                            sendButton.text = "Send"
+                            streamingTextPane = null
+                        }
+                    }
+                },
+            )
+        }
+    }
+
+    private fun clearChat() {
+        if (session.isStreaming) {
+            session.cancelStreaming()
+        }
+        session.clear()
+        messagesPanel.removeAll()
+        messagesPanel.revalidate()
+        messagesPanel.repaint()
+        sendButton.text = "Send"
+        streamingTextPane = null
+        addInfoMessage("Conversation cleared. Start a new chat.")
+    }
+
+    private fun loadModels() {
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val settings = CandleSettings.getInstance().state
+            val models = chatClient.fetchModels(settings.chatServerUrl)
+            SwingUtilities.invokeLater {
+                if (disposed) return@invokeLater
+                modelSelector.removeAllItems()
+                for (model in models) {
+                    modelSelector.addItem(model.id)
+                }
+                // Restore persisted selection
+                val defaultModel = settings.defaultModel
+                if (defaultModel.isNotEmpty()) {
+                    for (i in 0 until modelSelector.itemCount) {
+                        if (modelSelector.getItemAt(i) == defaultModel) {
+                            modelSelector.selectedIndex = i
+                            break
+                        }
+                    }
+                }
+                if (models.isEmpty()) {
+                    modelSelector.addItem("(no models — check connection)")
+                }
+            }
+        }
+    }
+
+    // ── Bubble Rendering ─────────────────────────────────────────────────
+
+    private fun addUserBubble(text: String) {
+        val bubble =
+            createBubble(
+                text = escapeBasicHtml(text).replace("\n", "<br>"),
+                isUser = true,
+            )
+        val wrapper =
+            JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0)).apply {
+                isOpaque = false
+                border = JBUI.Borders.empty(4, 40, 4, 8)
+                add(bubble)
+                maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
+            }
+        wrapper.alignmentX = Component.RIGHT_ALIGNMENT
+        messagesPanel.add(wrapper)
+        scrollToBottom()
+    }
+
+    private fun addAssistantBubble(markdown: String): JTextPane {
+        val textPane =
+            JTextPane().apply {
+                editorKit = HTMLEditorKit()
+                isEditable = false
+                isOpaque = false
+                border = JBUI.Borders.empty(4)
+                val html =
+                    MarkdownRenderer.wrapInHtmlDocument(
+                        MarkdownRenderer.renderToHtml(markdown),
+                        isUser = false,
+                    )
+                text = html
+            }
+
+        val bubblePanel =
+            JPanel(BorderLayout()).apply {
+                background = MarkdownRenderer.assistantBubbleBg()
+                border =
+                    BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(JBColor.border(), 1, true),
+                        JBUI.Borders.empty(6, 10),
+                    )
+                add(textPane, BorderLayout.CENTER)
+            }
+
+        val wrapper =
+            JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+                isOpaque = false
+                border = JBUI.Borders.empty(4, 8, 4, 40)
+                add(bubblePanel)
+                maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
+            }
+        wrapper.alignmentX = Component.LEFT_ALIGNMENT
+        messagesPanel.add(wrapper)
+        scrollToBottom()
+
+        return textPane
+    }
+
+    private fun updateStreamingBubble(markdown: String) {
+        streamingTextPane?.let { pane ->
+            val html =
+                MarkdownRenderer.wrapInHtmlDocument(
+                    MarkdownRenderer.renderToHtml(markdown),
+                    isUser = false,
+                )
+            pane.text = html
+            // Force re-layout
+            pane.parent?.let { bubble ->
+                bubble.parent?.let { wrapper ->
+                    wrapper.maximumSize = Dimension(Int.MAX_VALUE, wrapper.preferredSize.height)
+                }
+            }
+            messagesPanel.revalidate()
+            scrollToBottom()
+        }
+    }
+
+    private fun addCodeBlockActions(markdown: String) {
+        val codeBlocks = MarkdownRenderer.extractCodeBlocks(markdown)
+        if (codeBlocks.isEmpty()) return
+
+        val actionsPanel =
+            JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+                isOpaque = false
+                border = JBUI.Borders.empty(0, 8, 4, 8)
+            }
+
+        for ((index, code) in codeBlocks.withIndex()) {
+            val label = if (codeBlocks.size > 1) "Block ${index + 1}" else "Code"
+            val copyBtn =
+                JButton("📋 Copy $label").apply {
+                    isFocusPainted = false
+                    font = font.deriveFont(11f)
+                    cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                    addActionListener {
+                        CopyPasteManager.getInstance().setContents(StringSelection(code))
+                    }
+                }
+            val insertBtn =
+                JButton("▶ Insert $label").apply {
+                    isFocusPainted = false
+                    font = font.deriveFont(11f)
+                    cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                    addActionListener {
+                        insertAtCursor(code)
+                    }
+                }
+            actionsPanel.add(copyBtn)
+            actionsPanel.add(insertBtn)
+        }
+
+        actionsPanel.maximumSize = Dimension(Int.MAX_VALUE, actionsPanel.preferredSize.height)
+        messagesPanel.add(actionsPanel)
+        messagesPanel.revalidate()
+    }
+
+    private fun addTokenInfo(usage: ChunkUsage) {
+        val info = "Tokens: ${usage.prompt_tokens} in / ${usage.completion_tokens} out / ${usage.total_tokens} total"
+        val label =
+            JLabel(info).apply {
+                font = font.deriveFont(10f)
+                foreground = JBColor.GRAY
+                border = JBUI.Borders.empty(0, 12, 6, 0)
+            }
+        val wrapper =
+            JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+                isOpaque = false
+                add(label)
+                maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
+            }
+        messagesPanel.add(wrapper)
+        messagesPanel.revalidate()
+    }
+
+    private fun addInfoMessage(text: String) {
+        val label =
+            JLabel(text).apply {
+                foreground = JBColor.GRAY
+                font = font.deriveFont(Font.ITALIC, 12f)
+                border = JBUI.Borders.empty(12)
+                horizontalAlignment = SwingConstants.CENTER
+            }
+        val wrapper =
+            JPanel(BorderLayout()).apply {
+                isOpaque = false
+                add(label, BorderLayout.CENTER)
+                maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
+            }
+        messagesPanel.add(wrapper)
+        messagesPanel.revalidate()
+    }
+
+    private fun addErrorMessage(text: String) {
+        val label =
+            JLabel(text).apply {
+                foreground = JBColor.RED
+                font = font.deriveFont(12f)
+                border = JBUI.Borders.empty(6, 12)
+            }
+        val wrapper =
+            JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+                isOpaque = false
+                add(label)
+                maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
+            }
+        messagesPanel.add(wrapper)
+        messagesPanel.revalidate()
+        scrollToBottom()
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────
+
+    private fun createBubble(
+        text: String,
+        isUser: Boolean,
+    ): JPanel {
+        val textPane =
+            JTextPane().apply {
+                editorKit = HTMLEditorKit()
+                isEditable = false
+                isOpaque = false
+                border = JBUI.Borders.empty(4)
+                val html = MarkdownRenderer.wrapInHtmlDocument(text, isUser = isUser)
+                this.text = html
+            }
+
+        return JPanel(BorderLayout()).apply {
+            background = if (isUser) MarkdownRenderer.userBubbleBg() else MarkdownRenderer.assistantBubbleBg()
+            border =
+                BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(JBColor.border(), 1, true),
+                    JBUI.Borders.empty(6, 10),
+                )
+            add(textPane, BorderLayout.CENTER)
+        }
+    }
+
+    private fun scrollToBottom() {
+        SwingUtilities.invokeLater {
+            val scrollBar = messagesScroll.verticalScrollBar
+            scrollBar.value = scrollBar.maximum
+        }
+    }
+
+    private fun insertAtCursor(code: String) {
+        val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return
+        WriteCommandAction.runWriteCommandAction(project, "Insert from Candela Chat", null, {
+            val offset = editor.caretModel.offset
+            editor.document.insertString(offset, code)
+            editor.caretModel.moveToOffset(offset + code.length)
+        })
+    }
+
+    private fun escapeBasicHtml(text: String): String =
+        text
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+
+    companion object {
+        private val log = Logger.getInstance(ChatPanel::class.java)
+
+        /** Minimum interval between streaming UI updates (milliseconds). */
+        private const val STREAM_THROTTLE_MS = 80L
+    }
+}
