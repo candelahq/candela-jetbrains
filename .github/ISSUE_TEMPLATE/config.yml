@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 📖 Documentation
+    url: https://github.com/candelahq/candela
+    about: Check the main Candela project for documentation
+  - name: 💬 Discussions
+    url: https://github.com/candelahq/candela/discussions
+    about: Ask questions and share ideas
+  - name: 🔒 Security Vulnerability
+    url: https://github.com/candelahq/candela-jetbrains/security/advisories/new
+    about: Report security vulnerabilities privately

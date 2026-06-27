@@ -1,3 +1,10 @@
+# Candela JetBrains — CI Pipeline
+#
+# Jobs:
+#   build — lint, static analysis, tests, plugin build & verification
+#
+# Mirrors the CI patterns from the main candela repo.
+
 name: CI
 
 on:
@@ -6,9 +13,16 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel in-flight runs for the same PR/branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
+    name: Build & Test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -19,11 +33,17 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Lint
+      - name: Lint (ktlint)
         run: ./gradlew ktlintCheck
+
+      - name: Static analysis (detekt)
+        run: ./gradlew detekt
+
+      - name: Run tests
+        run: ./gradlew test
 
       - name: Build plugin
         run: ./gradlew buildPlugin
 
-      - name: Run tests
-        run: ./gradlew test
+      - name: Verify plugin compatibility
+        run: ./gradlew verifyPlugin

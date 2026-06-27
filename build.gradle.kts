@@ -3,6 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.jvm") version "2.1.20"
     id("org.jetbrains.intellij.platform") version "2.6.0"
     id("org.jlleitschuh.gradle.ktlint") version "12.2.0"
+    id("io.gitlab.arturbosch.detekt") version "1.23.7"
 }
 
 group = "com.candelahq"
@@ -25,6 +26,7 @@ dependencies {
 
     testImplementation(kotlin("test"))
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+    testImplementation("junit:junit:4.13.2") // Required by IntelliJ platform test framework
 }
 
 kotlin {
@@ -33,6 +35,12 @@ kotlin {
 
 ktlint {
     version.set("1.6.0")
+}
+
+detekt {
+    config.setFrom(files("detekt.yml"))
+    buildUponDefaultConfig = true
+    parallel = true
 }
 
 intellijPlatform {

@@ -1,0 +1,65 @@
+name: 🐛 Bug Report
+description: Report a bug or unexpected behavior
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please fill out the details below.
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear description of the bug.
+      placeholder: When I do X, Y happens instead of Z.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal steps to reproduce the behavior.
+      placeholder: |
+        1. Open the IDE with Candela plugin installed
+        2. Open Candela Chat tool window
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Chat Tool Window
+        - Status Bar Widget
+        - Settings / Configuration
+        - Editor Context Actions
+        - Dashboard Connection
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Plugin Version
+      description: Check in Settings → Plugins → Candela
+      placeholder: 0.1.1
+  - type: input
+    id: ide
+    attributes:
+      label: IDE & Version
+      description: "e.g., IntelliJ IDEA 2024.3.1, PyCharm 2025.1"
+      placeholder: IntelliJ IDEA 2024.3.1
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs
+      description: Paste relevant log output from Help → Show Log in Finder (will be auto-formatted as code).
+      render: shell
