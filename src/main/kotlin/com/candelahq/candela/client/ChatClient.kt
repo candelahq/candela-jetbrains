@@ -164,7 +164,7 @@ class ChatClient {
             // Signal completion or premature EOF
             if (!cancelled.get()) {
                 if (doneReceived) {
-                    log.info("Chat stream complete: ${lastUsage?.total_tokens ?: "?"} tokens")
+                    log.info("Chat stream complete: ${lastUsage?.totalTokens ?: "?"} tokens")
                     onComplete(lastUsage)
                 } else {
                     log.warn("Chat stream ended without [DONE] marker")

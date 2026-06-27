@@ -97,12 +97,12 @@ class ModelsTest {
 
     @Test
     fun `ChunkUsage deserializes token counts`() {
-        val json = """{"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}"""
+        val json = """{ "prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}"""
         val usage = gson.fromJson(json, ChunkUsage::class.java)
         assertNotNull(usage)
-        assertEquals(10, usage.prompt_tokens)
-        assertEquals(20, usage.completion_tokens)
-        assertEquals(30, usage.total_tokens)
+        assertEquals(10, usage.promptTokens)
+        assertEquals(20, usage.completionTokens)
+        assertEquals(30, usage.totalTokens)
     }
 
     @Test
@@ -117,7 +117,7 @@ class ModelsTest {
             """.trimIndent()
         val chunk = gson.fromJson(json, ChatCompletionChunk::class.java)
         assertNotNull(chunk.usage)
-        assertEquals(150, chunk.usage!!.total_tokens)
+        assertEquals(150, chunk.usage!!.totalTokens)
     }
 
     @Test
