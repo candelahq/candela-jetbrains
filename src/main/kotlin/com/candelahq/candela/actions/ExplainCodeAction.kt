@@ -13,8 +13,9 @@ import com.intellij.openapi.wm.ToolWindowManager
  *
  * Sends the selected code to Candela Chat with an "Explain this code" prompt.
  */
-class ExplainCodeAction : AnAction(), DumbAware {
-
+class ExplainCodeAction :
+    AnAction(),
+    DumbAware {
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
     override fun actionPerformed(e: AnActionEvent) {
@@ -28,8 +29,10 @@ class ExplainCodeAction : AnAction(), DumbAware {
 
         val message = "Explain this code from `$fileName`:\n\n```$lang\n$selectedText\n```"
 
-        val toolWindow = ToolWindowManager.getInstance(project)
-            .getToolWindow(ChatToolWindowFactory.TOOL_WINDOW_ID) ?: return
+        val toolWindow =
+            ToolWindowManager
+                .getInstance(project)
+                .getToolWindow(ChatToolWindowFactory.TOOL_WINDOW_ID) ?: return
         toolWindow.show {
             ChatToolWindowFactory.getPanel(project)?.sendMessage(message)
         }
@@ -39,7 +42,9 @@ class ExplainCodeAction : AnAction(), DumbAware {
         val project = e.project
         val editor = e.getData(CommonDataKeys.EDITOR)
         e.presentation.isEnabledAndVisible =
-            project != null && !project.isDisposed &&
-            editor != null && editor.selectionModel.hasSelection()
+            project != null &&
+            !project.isDisposed &&
+            editor != null &&
+            editor.selectionModel.hasSelection()
     }
 }

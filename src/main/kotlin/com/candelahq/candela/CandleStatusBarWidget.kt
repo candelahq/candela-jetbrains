@@ -17,30 +17,42 @@ import java.util.concurrent.TimeUnit
 
 class CandleStatusBarWidgetFactory : StatusBarWidgetFactory {
     override fun getId(): String = "CandelaStatusBar"
+
     override fun getDisplayName(): String = "Candela Cost Tracker"
-    override fun isAvailable(project: Project): Boolean =
-        CandleSettings.getInstance().state.statusBarEnabled
+
+    override fun isAvailable(project: Project): Boolean = CandleSettings.getInstance().state.statusBarEnabled
 
     override fun createWidget(project: Project): StatusBarWidget = CandleStatusBarWidget(project)
 }
 
-class CandleStatusBarWidget(private val project: Project) : StatusBarWidget,
+class CandleStatusBarWidget(
+    private val project: Project,
+) : StatusBarWidget,
     StatusBarWidget.TextPresentation {
-
     companion object {
         const val ID = "CandelaStatusBar"
     }
 
     private var statusBar: StatusBar? = null
+
+    @Volatile
     private var currentText = "🕯️ Candela"
+
+    @Volatile
     private var currentTooltip = "Candela — LLM Cost Tracker"
+
+    @Volatile
     private var lastData: DashboardData? = null
 
-    private val scheduler = Executors.newSingleThreadScheduledExecutor { r ->
-        Thread(r, "candela-status-bar").apply { isDaemon = true }
-    }
+    private val scheduler =
+        Executors.newSingleThreadScheduledExecutor { r ->
+            Thread(r, "candela-status-bar").apply { isDaemon = true }
+        }
+
+    @Volatile
     private var refreshTask: ScheduledFuture<*>? = null
     private var client: CandelaClient? = null
+    private var activeServerUrl: String = ""
 
     override fun ID(): String = ID
 
@@ -68,11 +80,12 @@ class CandleStatusBarWidget(private val project: Project) : StatusBarWidget,
 
     override fun getAlignment(): Float = Component.CENTER_ALIGNMENT
 
-    override fun getClickConsumer(): Consumer<MouseEvent> = Consumer {
-        // Show cost summary on click
-        val data = lastData ?: return@Consumer
-        CandleNotifications.showCostSummary(project, data)
-    }
+    override fun getClickConsumer(): Consumer<MouseEvent> =
+        Consumer {
+            // Show cost summary on click
+            val data = lastData ?: return@Consumer
+            CandleNotifications.showCostSummary(project, data)
+        }
 
     // ── Refresh ───────────────────────────────────────────────────────────
 
@@ -85,25 +98,47 @@ class CandleStatusBarWidget(private val project: Project) : StatusBarWidget,
     private fun scheduleRefresh(intervalSeconds: Int) {
         refreshTask?.cancel(false)
         if (intervalSeconds <= 0) return
-        refreshTask = scheduler.scheduleAtFixedRate(
-            { refresh() },
-            intervalSeconds.toLong(),
-            intervalSeconds.toLong(),
-            TimeUnit.SECONDS,
-        )
+        refreshTask =
+            scheduler.scheduleAtFixedRate(
+                {
+                    try {
+                        refresh()
+                    } catch (_: Throwable) {
+                        // Prevent silent scheduler termination
+                    }
+                },
+                intervalSeconds.toLong(),
+                intervalSeconds.toLong(),
+                TimeUnit.SECONDS,
+            )
     }
 
     private fun refresh() {
+        val settings = CandleSettings.getInstance().state
+        val serverUrl = settings.serverUrl
+        if (serverUrl != activeServerUrl) {
+            activeServerUrl = serverUrl
+            client = CandelaClient(serverUrl, cacheTtlMs = 30_000)
+        }
         val data = client?.getDashboardData()
         if (data == null) {
             currentText = "🕯️ offline"
             currentTooltip = "Candela is not running"
             // Back off to 5 minutes when offline
             refreshTask?.cancel(false)
-            refreshTask = scheduler.scheduleAtFixedRate(
-                { refresh() },
-                300, 300, TimeUnit.SECONDS,
-            )
+            refreshTask =
+                scheduler.scheduleAtFixedRate(
+                    {
+                        try {
+                            refresh()
+                        } catch (_: Throwable) {
+                            // Prevent silent scheduler termination
+                        }
+                    },
+                    300,
+                    300,
+                    TimeUnit.SECONDS,
+                )
         } else {
             lastData = data
             currentText = formatStatusText(data)
@@ -135,15 +170,17 @@ class CandleStatusBarWidget(private val project: Project) : StatusBarWidget,
     private fun formatStatusText(data: DashboardData): String {
         val tokens = formatTokenCount(data.usage.totalTokens)
         val cost = formatCost(data.usage.totalCostUsd)
-        val budgetPart = data.budget?.let { b ->
-            val pct = b.percentUsed.toInt()
-            val icon = when {
-                b.isExhausted -> "🔴"
-                b.isNearLimit -> "🟡"
-                else -> "🟢"
-            }
-            " · $icon${pct}%"
-        } ?: ""
+        val budgetPart =
+            data.budget?.let { b ->
+                val pct = b.percentUsed.toInt()
+                val icon =
+                    when {
+                        b.isExhausted -> "🔴"
+                        b.isNearLimit -> "🟡"
+                        else -> "🟢"
+                    }
+                " · $icon$pct%"
+            } ?: ""
         return "🔥 $tokens · $cost$budgetPart"
     }
 
@@ -151,7 +188,11 @@ class CandleStatusBarWidget(private val project: Project) : StatusBarWidget,
         val sb = StringBuilder()
         sb.appendLine("Candela — Today's Usage")
         sb.appendLine("─".repeat(30))
-        sb.appendLine("Tokens: ${formatTokenCount(data.usage.totalTokens)} (${formatTokenCount(data.usage.inputTokens)} in / ${formatTokenCount(data.usage.outputTokens)} out)")
+        sb.appendLine(
+            "Tokens: ${formatTokenCount(
+                data.usage.totalTokens,
+            )} (${formatTokenCount(data.usage.inputTokens)} in / ${formatTokenCount(data.usage.outputTokens)} out)",
+        )
         sb.appendLine("Cost: ${formatCost(data.usage.totalCostUsd)}")
         sb.appendLine("Requests: ${data.usage.requestCount}")
 
@@ -184,10 +225,11 @@ class CandleStatusBarWidget(private val project: Project) : StatusBarWidget,
 
 // ── Shared formatting ─────────────────────────────────────────────────────
 
-internal fun formatTokenCount(tokens: Long): String = when {
-    tokens >= 1_000_000 -> "%.1fM".format(tokens / 1_000_000.0)
-    tokens >= 1_000 -> "%.1fK".format(tokens / 1_000.0)
-    else -> tokens.toString()
-}
+internal fun formatTokenCount(tokens: Long): String =
+    when {
+        tokens >= 1_000_000 -> "%.1fM".format(tokens / 1_000_000.0)
+        tokens >= 1_000 -> "%.1fK".format(tokens / 1_000.0)
+        else -> tokens.toString()
+    }
 
 internal fun formatCost(usd: Double): String = "\$%.2f".format(usd)

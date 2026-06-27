@@ -62,7 +62,7 @@ data class DashboardData(
 
 /** A single message in a chat conversation. */
 data class ChatMessage(
-    val role: String,     // "system", "user", "assistant"
+    val role: String, // "system", "user", "assistant"
     val content: String,
 )
 

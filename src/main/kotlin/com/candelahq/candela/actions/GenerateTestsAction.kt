@@ -13,8 +13,9 @@ import com.intellij.openapi.wm.ToolWindowManager
  *
  * Sends the selected code to Candela Chat with a "Write unit tests" prompt.
  */
-class GenerateTestsAction : AnAction(), DumbAware {
-
+class GenerateTestsAction :
+    AnAction(),
+    DumbAware {
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
     override fun actionPerformed(e: AnActionEvent) {
@@ -28,8 +29,10 @@ class GenerateTestsAction : AnAction(), DumbAware {
 
         val message = "Write unit tests for this code from `$fileName`:\n\n```$lang\n$selectedText\n```"
 
-        val toolWindow = ToolWindowManager.getInstance(project)
-            .getToolWindow(ChatToolWindowFactory.TOOL_WINDOW_ID) ?: return
+        val toolWindow =
+            ToolWindowManager
+                .getInstance(project)
+                .getToolWindow(ChatToolWindowFactory.TOOL_WINDOW_ID) ?: return
         toolWindow.show {
             ChatToolWindowFactory.getPanel(project)?.sendMessage(message)
         }
@@ -39,7 +42,9 @@ class GenerateTestsAction : AnAction(), DumbAware {
         val project = e.project
         val editor = e.getData(CommonDataKeys.EDITOR)
         e.presentation.isEnabledAndVisible =
-            project != null && !project.isDisposed &&
-            editor != null && editor.selectionModel.hasSelection()
+            project != null &&
+            !project.isDisposed &&
+            editor != null &&
+            editor.selectionModel.hasSelection()
     }
 }

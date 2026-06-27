@@ -14,11 +14,25 @@ import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.util.ui.JBUI
-import java.awt.*
+import java.awt.BorderLayout
+import java.awt.Component
+import java.awt.Cursor
+import java.awt.Dimension
+import java.awt.FlowLayout
+import java.awt.Font
 import java.awt.datatransfer.StringSelection
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
-import javax.swing.*
+import javax.swing.BorderFactory
+import javax.swing.BoxLayout
+import javax.swing.JButton
+import javax.swing.JComboBox
+import javax.swing.JLabel
+import javax.swing.JPanel
+import javax.swing.JTextPane
+import javax.swing.ScrollPaneConstants
+import javax.swing.SwingConstants
+import javax.swing.SwingUtilities
 import javax.swing.text.html.HTMLEditorKit
 
 /**
@@ -31,33 +45,39 @@ import javax.swing.text.html.HTMLEditorKit
  *
  * Implements [Disposable] to clean up resources when the tool window is closed.
  */
-class ChatPanel(private val project: Project) : JPanel(BorderLayout()), Disposable {
-
+class ChatPanel(
+    private val project: Project,
+) : JPanel(BorderLayout()),
+    Disposable {
     private val chatClient = ChatClient()
     private val session = ChatSession()
 
     // ── UI Components ────────────────────────────────────────────────────
 
     private val modelSelector = JComboBox<String>()
-    private val messagesPanel = JPanel().apply {
-        layout = BoxLayout(this, BoxLayout.Y_AXIS)
-        background = JBColor.PanelBackground
-    }
-    private val messagesScroll = JBScrollPane(messagesPanel).apply {
-        border = JBUI.Borders.empty()
-        verticalScrollBarPolicy = ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED
-        horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
-    }
-    private val inputArea = JBTextArea(3, 40).apply {
-        lineWrap = true
-        wrapStyleWord = true
-        border = JBUI.Borders.empty(8)
-        font = Font("JetBrains Mono", Font.PLAIN, 13)
-        background = MarkdownRenderer.inputAreaBg()
-    }
-    private val sendButton = JButton("Send").apply {
-        isFocusPainted = false
-    }
+    private val messagesPanel =
+        JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            background = JBColor.PanelBackground
+        }
+    private val messagesScroll =
+        JBScrollPane(messagesPanel).apply {
+            border = JBUI.Borders.empty()
+            verticalScrollBarPolicy = ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED
+            horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
+        }
+    private val inputArea =
+        JBTextArea(3, 40).apply {
+            lineWrap = true
+            wrapStyleWord = true
+            border = JBUI.Borders.empty(8)
+            font = Font("JetBrains Mono", Font.PLAIN, 13)
+            background = MarkdownRenderer.inputAreaBg()
+        }
+    private val sendButton =
+        JButton("Send").apply {
+            isFocusPainted = false
+        }
 
     // Track the currently streaming assistant text pane for incremental updates
     private var streamingTextPane: JTextPane? = null
@@ -99,35 +119,38 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()), Disposab
             session.cancelStreaming()
         }
         streamingTextPane = null
-        LOG.info("ChatPanel disposed for project: ${project.name}")
+        log.info("ChatPanel disposed for project: ${project.name}")
     }
 
     // ── UI Construction ──────────────────────────────────────────────────
 
     private fun buildUI() {
         // Toolbar (NORTH)
-        val toolbar = JPanel(FlowLayout(FlowLayout.LEFT, 4, 2)).apply {
-            background = MarkdownRenderer.toolbarBg()
-            border = JBUI.Borders.customLine(JBColor.border(), 0, 0, 1, 0)
-        }
+        val toolbar =
+            JPanel(FlowLayout(FlowLayout.LEFT, 4, 2)).apply {
+                background = MarkdownRenderer.toolbarBg()
+                border = JBUI.Borders.customLine(JBColor.border(), 0, 0, 1, 0)
+            }
 
         modelSelector.preferredSize = Dimension(220, 28)
         modelSelector.toolTipText = "Select LLM model"
         toolbar.add(JLabel("Model:"))
         toolbar.add(modelSelector)
 
-        val refreshBtn = JButton("↻").apply {
-            toolTipText = "Refresh models"
-            isFocusPainted = false
-            addActionListener { loadModels() }
-        }
+        val refreshBtn =
+            JButton("↻").apply {
+                toolTipText = "Refresh models"
+                isFocusPainted = false
+                addActionListener { loadModels() }
+            }
         toolbar.add(refreshBtn)
 
-        val newChatBtn = JButton("New Chat").apply {
-            toolTipText = "Clear conversation"
-            isFocusPainted = false
-            addActionListener { clearChat() }
-        }
+        val newChatBtn =
+            JButton("New Chat").apply {
+                toolTipText = "Clear conversation"
+                isFocusPainted = false
+                addActionListener { clearChat() }
+            }
         toolbar.add(newChatBtn)
 
         add(toolbar, BorderLayout.NORTH)
@@ -136,25 +159,29 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()), Disposab
         add(messagesScroll, BorderLayout.CENTER)
 
         // Input area (SOUTH)
-        val inputPanel = JPanel(BorderLayout()).apply {
-            border = JBUI.Borders.customLine(JBColor.border(), 1, 0, 0, 0)
-        }
-
-        inputArea.addKeyListener(object : KeyAdapter() {
-            override fun keyPressed(e: KeyEvent) {
-                if (e.keyCode == KeyEvent.VK_ENTER && !e.isShiftDown) {
-                    e.consume()
-                    doSend()
-                }
+        val inputPanel =
+            JPanel(BorderLayout()).apply {
+                border = JBUI.Borders.customLine(JBColor.border(), 1, 0, 0, 0)
             }
-        })
+
+        inputArea.addKeyListener(
+            object : KeyAdapter() {
+                override fun keyPressed(e: KeyEvent) {
+                    if (e.keyCode == KeyEvent.VK_ENTER && !e.isShiftDown) {
+                        e.consume()
+                        doSend()
+                    }
+                }
+            },
+        )
 
         sendButton.addActionListener { doSend() }
 
-        val inputScroll = JBScrollPane(inputArea).apply {
-            border = JBUI.Borders.empty()
-            preferredSize = Dimension(0, 72)
-        }
+        val inputScroll =
+            JBScrollPane(inputArea).apply {
+                border = JBUI.Borders.empty()
+                preferredSize = Dimension(0, 72)
+            }
         inputPanel.add(inputScroll, BorderLayout.CENTER)
         inputPanel.add(sendButton, BorderLayout.EAST)
 
@@ -200,7 +227,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()), Disposab
             settings.defaultModel = model
         }
 
-        LOG.info("Sending chat request: model=$model, messages=${messages.size}")
+        log.info("Sending chat request: model=$model, messages=${messages.size}")
 
         ApplicationManager.getApplication().executeOnPooledThread {
             chatClient.streamChat(
@@ -242,7 +269,7 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()), Disposab
                 },
                 onError = { error ->
                     session.stopStreaming()
-                    LOG.warn("Chat stream error", error)
+                    log.warn("Chat stream error", error)
                     SwingUtilities.invokeLater {
                         if (!disposed) {
                             addErrorMessage("Error: ${error.message ?: "Unknown error"}")
@@ -298,49 +325,56 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()), Disposab
     // ── Bubble Rendering ─────────────────────────────────────────────────
 
     private fun addUserBubble(text: String) {
-        val bubble = createBubble(
-            text = escapeBasicHtml(text).replace("\n", "<br>"),
-            isUser = true,
-        )
-        val wrapper = JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0)).apply {
-            isOpaque = false
-            border = JBUI.Borders.empty(4, 40, 4, 8)
-            add(bubble)
-            maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
-        }
+        val bubble =
+            createBubble(
+                text = escapeBasicHtml(text).replace("\n", "<br>"),
+                isUser = true,
+            )
+        val wrapper =
+            JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0)).apply {
+                isOpaque = false
+                border = JBUI.Borders.empty(4, 40, 4, 8)
+                add(bubble)
+                maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
+            }
         wrapper.alignmentX = Component.RIGHT_ALIGNMENT
         messagesPanel.add(wrapper)
         scrollToBottom()
     }
 
     private fun addAssistantBubble(markdown: String): JTextPane {
-        val textPane = JTextPane().apply {
-            editorKit = HTMLEditorKit()
-            isEditable = false
-            isOpaque = false
-            border = JBUI.Borders.empty(4)
-            val html = MarkdownRenderer.wrapInHtmlDocument(
-                MarkdownRenderer.renderToHtml(markdown),
-                isUser = false,
-            )
-            text = html
-        }
+        val textPane =
+            JTextPane().apply {
+                editorKit = HTMLEditorKit()
+                isEditable = false
+                isOpaque = false
+                border = JBUI.Borders.empty(4)
+                val html =
+                    MarkdownRenderer.wrapInHtmlDocument(
+                        MarkdownRenderer.renderToHtml(markdown),
+                        isUser = false,
+                    )
+                text = html
+            }
 
-        val bubblePanel = JPanel(BorderLayout()).apply {
-            background = MarkdownRenderer.assistantBubbleBg()
-            border = BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(JBColor.border(), 1, true),
-                JBUI.Borders.empty(6, 10),
-            )
-            add(textPane, BorderLayout.CENTER)
-        }
+        val bubblePanel =
+            JPanel(BorderLayout()).apply {
+                background = MarkdownRenderer.assistantBubbleBg()
+                border =
+                    BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(JBColor.border(), 1, true),
+                        JBUI.Borders.empty(6, 10),
+                    )
+                add(textPane, BorderLayout.CENTER)
+            }
 
-        val wrapper = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
-            isOpaque = false
-            border = JBUI.Borders.empty(4, 8, 4, 40)
-            add(bubblePanel)
-            maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
-        }
+        val wrapper =
+            JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+                isOpaque = false
+                border = JBUI.Borders.empty(4, 8, 4, 40)
+                add(bubblePanel)
+                maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
+            }
         wrapper.alignmentX = Component.LEFT_ALIGNMENT
         messagesPanel.add(wrapper)
         scrollToBottom()
@@ -350,10 +384,11 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()), Disposab
 
     private fun updateStreamingBubble(markdown: String) {
         streamingTextPane?.let { pane ->
-            val html = MarkdownRenderer.wrapInHtmlDocument(
-                MarkdownRenderer.renderToHtml(markdown),
-                isUser = false,
-            )
+            val html =
+                MarkdownRenderer.wrapInHtmlDocument(
+                    MarkdownRenderer.renderToHtml(markdown),
+                    isUser = false,
+                )
             pane.text = html
             // Force re-layout
             pane.parent?.let { bubble ->
@@ -370,29 +405,32 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()), Disposab
         val codeBlocks = MarkdownRenderer.extractCodeBlocks(markdown)
         if (codeBlocks.isEmpty()) return
 
-        val actionsPanel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
-            isOpaque = false
-            border = JBUI.Borders.empty(0, 8, 4, 8)
-        }
+        val actionsPanel =
+            JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+                isOpaque = false
+                border = JBUI.Borders.empty(0, 8, 4, 8)
+            }
 
         for ((index, code) in codeBlocks.withIndex()) {
             val label = if (codeBlocks.size > 1) "Block ${index + 1}" else "Code"
-            val copyBtn = JButton("📋 Copy $label").apply {
-                isFocusPainted = false
-                font = font.deriveFont(11f)
-                cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-                addActionListener {
-                    CopyPasteManager.getInstance().setContents(StringSelection(code))
+            val copyBtn =
+                JButton("📋 Copy $label").apply {
+                    isFocusPainted = false
+                    font = font.deriveFont(11f)
+                    cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                    addActionListener {
+                        CopyPasteManager.getInstance().setContents(StringSelection(code))
+                    }
                 }
-            }
-            val insertBtn = JButton("▶ Insert $label").apply {
-                isFocusPainted = false
-                font = font.deriveFont(11f)
-                cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-                addActionListener {
-                    insertAtCursor(code)
+            val insertBtn =
+                JButton("▶ Insert $label").apply {
+                    isFocusPainted = false
+                    font = font.deriveFont(11f)
+                    cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                    addActionListener {
+                        insertAtCursor(code)
+                    }
                 }
-            }
             actionsPanel.add(copyBtn)
             actionsPanel.add(insertBtn)
         }
@@ -404,47 +442,53 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()), Disposab
 
     private fun addTokenInfo(usage: ChunkUsage) {
         val info = "Tokens: ${usage.prompt_tokens} in / ${usage.completion_tokens} out / ${usage.total_tokens} total"
-        val label = JLabel(info).apply {
-            font = font.deriveFont(10f)
-            foreground = JBColor.GRAY
-            border = JBUI.Borders.empty(0, 12, 6, 0)
-        }
-        val wrapper = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
-            isOpaque = false
-            add(label)
-            maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
-        }
+        val label =
+            JLabel(info).apply {
+                font = font.deriveFont(10f)
+                foreground = JBColor.GRAY
+                border = JBUI.Borders.empty(0, 12, 6, 0)
+            }
+        val wrapper =
+            JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+                isOpaque = false
+                add(label)
+                maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
+            }
         messagesPanel.add(wrapper)
         messagesPanel.revalidate()
     }
 
     private fun addInfoMessage(text: String) {
-        val label = JLabel(text).apply {
-            foreground = JBColor.GRAY
-            font = font.deriveFont(Font.ITALIC, 12f)
-            border = JBUI.Borders.empty(12)
-            horizontalAlignment = SwingConstants.CENTER
-        }
-        val wrapper = JPanel(BorderLayout()).apply {
-            isOpaque = false
-            add(label, BorderLayout.CENTER)
-            maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
-        }
+        val label =
+            JLabel(text).apply {
+                foreground = JBColor.GRAY
+                font = font.deriveFont(Font.ITALIC, 12f)
+                border = JBUI.Borders.empty(12)
+                horizontalAlignment = SwingConstants.CENTER
+            }
+        val wrapper =
+            JPanel(BorderLayout()).apply {
+                isOpaque = false
+                add(label, BorderLayout.CENTER)
+                maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
+            }
         messagesPanel.add(wrapper)
         messagesPanel.revalidate()
     }
 
     private fun addErrorMessage(text: String) {
-        val label = JLabel(text).apply {
-            foreground = JBColor.RED
-            font = font.deriveFont(12f)
-            border = JBUI.Borders.empty(6, 12)
-        }
-        val wrapper = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
-            isOpaque = false
-            add(label)
-            maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
-        }
+        val label =
+            JLabel(text).apply {
+                foreground = JBColor.RED
+                font = font.deriveFont(12f)
+                border = JBUI.Borders.empty(6, 12)
+            }
+        val wrapper =
+            JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+                isOpaque = false
+                add(label)
+                maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
+            }
         messagesPanel.add(wrapper)
         messagesPanel.revalidate()
         scrollToBottom()
@@ -452,22 +496,27 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()), Disposab
 
     // ── Helpers ──────────────────────────────────────────────────────────
 
-    private fun createBubble(text: String, isUser: Boolean): JPanel {
-        val textPane = JTextPane().apply {
-            editorKit = HTMLEditorKit()
-            isEditable = false
-            isOpaque = false
-            border = JBUI.Borders.empty(4)
-            val html = MarkdownRenderer.wrapInHtmlDocument(text, isUser = isUser)
-            this.text = html
-        }
+    private fun createBubble(
+        text: String,
+        isUser: Boolean,
+    ): JPanel {
+        val textPane =
+            JTextPane().apply {
+                editorKit = HTMLEditorKit()
+                isEditable = false
+                isOpaque = false
+                border = JBUI.Borders.empty(4)
+                val html = MarkdownRenderer.wrapInHtmlDocument(text, isUser = isUser)
+                this.text = html
+            }
 
         return JPanel(BorderLayout()).apply {
             background = if (isUser) MarkdownRenderer.userBubbleBg() else MarkdownRenderer.assistantBubbleBg()
-            border = BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(JBColor.border(), 1, true),
-                JBUI.Borders.empty(6, 10),
-            )
+            border =
+                BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(JBColor.border(), 1, true),
+                    JBUI.Borders.empty(6, 10),
+                )
             add(textPane, BorderLayout.CENTER)
         }
     }
@@ -488,15 +537,14 @@ class ChatPanel(private val project: Project) : JPanel(BorderLayout()), Disposab
         })
     }
 
-    private fun escapeBasicHtml(text: String): String {
-        return text
+    private fun escapeBasicHtml(text: String): String =
+        text
             .replace("&", "&amp;")
             .replace("<", "&lt;")
             .replace(">", "&gt;")
-    }
 
     companion object {
-        private val LOG = Logger.getInstance(ChatPanel::class.java)
+        private val log = Logger.getInstance(ChatPanel::class.java)
 
         /** Minimum interval between streaming UI updates (milliseconds). */
         private const val STREAM_THROTTLE_MS = 80L

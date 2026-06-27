@@ -19,12 +19,13 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Does NOT use ktor's SSE client (which has broken EOF handling).
  */
 class ChatClient {
+    private val log = Logger.getInstance(ChatClient::class.java)
 
-    private val LOG = Logger.getInstance(ChatClient::class.java)
-
-    private val client = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .build()
+    private val client =
+        HttpClient
+            .newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .build()
     private val gson = Gson()
 
     /**
@@ -33,13 +34,15 @@ class ChatClient {
      * @return list of model info, empty on error
      */
     fun fetchModels(baseUrl: String): List<ModelInfo> {
-        LOG.info("Fetching models from ${baseUrl.trimEnd('/')}")
+        log.info("Fetching models from ${baseUrl.trimEnd('/')}")
         return try {
-            val request = HttpRequest.newBuilder()
-                .uri(URI.create("${baseUrl.trimEnd('/')}/v1/models"))
-                .timeout(Duration.ofSeconds(10))
-                .GET()
-                .build()
+            val request =
+                HttpRequest
+                    .newBuilder()
+                    .uri(URI.create("${baseUrl.trimEnd('/')}/v1/models"))
+                    .timeout(Duration.ofSeconds(10))
+                    .GET()
+                    .build()
 
             val response = client.send(request, HttpResponse.BodyHandlers.ofString())
             if (response.statusCode() in 200..299) {
@@ -49,7 +52,7 @@ class ChatClient {
                 emptyList()
             }
         } catch (e: Exception) {
-            LOG.warn("Failed to fetch models", e)
+            log.warn("Failed to fetch models", e)
             emptyList()
         }
     }
@@ -80,16 +83,18 @@ class ChatClient {
         onError: (Exception) -> Unit,
     ) {
         try {
-            LOG.info("Starting chat stream: model=$model, maxTokens=$maxTokens")
+            log.info("Starting chat stream: model=$model, maxTokens=$maxTokens")
             val body = buildRequestBody(model, messages, maxTokens)
 
-            val request = HttpRequest.newBuilder()
-                .uri(URI.create("${baseUrl.trimEnd('/')}/v1/chat/completions"))
-                .header("Content-Type", "application/json")
-                .header("Accept", "text/event-stream")
-                .timeout(Duration.ofSeconds(300)) // Long timeout for streaming
-                .POST(HttpRequest.BodyPublishers.ofString(body))
-                .build()
+            val request =
+                HttpRequest
+                    .newBuilder()
+                    .uri(URI.create("${baseUrl.trimEnd('/')}/v1/chat/completions"))
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "text/event-stream")
+                    .timeout(Duration.ofSeconds(300)) // Long timeout for streaming
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build()
 
             val response = client.send(request, HttpResponse.BodyHandlers.ofInputStream())
 
@@ -120,7 +125,7 @@ class ChatClient {
                     }
 
                     val data = line.removePrefix("data: ").removePrefix("data:").trim()
-                    LOG.debug("SSE data: ${data.take(200)}")
+                    log.debug("SSE data: ${data.take(200)}")
 
                     // Stream terminator
                     if (data == "[DONE]") {
@@ -144,7 +149,7 @@ class ChatClient {
                             onToken(content)
                         }
                     } catch (e: Exception) {
-                        LOG.warn("Malformed SSE chunk: ${data.take(200)}", e)
+                        log.warn("Malformed SSE chunk: ${data.take(200)}", e)
                     }
 
                     line = reader.readLine()
@@ -154,15 +159,15 @@ class ChatClient {
             // Signal completion or premature EOF
             if (!cancelled.get()) {
                 if (doneReceived) {
-                    LOG.info("Chat stream complete: ${lastUsage?.total_tokens ?: "?"} tokens")
+                    log.info("Chat stream complete: ${lastUsage?.total_tokens ?: "?"} tokens")
                     onComplete(lastUsage)
                 } else {
-                    LOG.warn("Chat stream ended without [DONE] marker")
+                    log.warn("Chat stream ended without [DONE] marker")
                     onError(RuntimeException("Stream ended unexpectedly — response may be incomplete"))
                 }
             }
         } catch (e: Exception) {
-            LOG.error("Chat stream failed", e)
+            log.error("Chat stream failed", e)
             if (!cancelled.get()) {
                 onError(e)
             }
@@ -174,24 +179,26 @@ class ChatClient {
         messages: List<ChatMessage>,
         maxTokens: Int,
     ): String {
-        val body = JsonObject().apply {
-            addProperty("model", model)
-            addProperty("stream", true)
-            addProperty("max_tokens", maxTokens)
+        val body =
+            JsonObject().apply {
+                addProperty("model", model)
+                addProperty("stream", true)
+                addProperty("max_tokens", maxTokens)
 
-            val streamOptions = JsonObject().apply { addProperty("include_usage", true) }
-            add("stream_options", streamOptions)
+                val streamOptions = JsonObject().apply { addProperty("include_usage", true) }
+                add("stream_options", streamOptions)
 
-            val messagesArray = com.google.gson.JsonArray()
-            for (msg in messages) {
-                val msgObj = JsonObject().apply {
-                    addProperty("role", msg.role)
-                    addProperty("content", msg.content)
+                val messagesArray = com.google.gson.JsonArray()
+                for (msg in messages) {
+                    val msgObj =
+                        JsonObject().apply {
+                            addProperty("role", msg.role)
+                            addProperty("content", msg.content)
+                        }
+                    messagesArray.add(msgObj)
                 }
-                messagesArray.add(msgObj)
+                add("messages", messagesArray)
             }
-            add("messages", messagesArray)
-        }
         return gson.toJson(body)
     }
 }

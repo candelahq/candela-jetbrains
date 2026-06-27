@@ -14,8 +14,9 @@ import com.intellij.ui.content.ContentFactory
  * actions can retrieve and interact with it. Implements [DumbAware]
  * so the chat is available even during indexing.
  */
-class ChatToolWindowFactory : ToolWindowFactory, DumbAware {
-
+class ChatToolWindowFactory :
+    ToolWindowFactory,
+    DumbAware {
     companion object {
         const val TOOL_WINDOW_ID = "Candela Chat"
 
@@ -23,11 +24,13 @@ class ChatToolWindowFactory : ToolWindowFactory, DumbAware {
          * Get the chat panel for a project, if the tool window has been created.
          * Prefer using [ChatPanelService.getInstance] directly.
          */
-        fun getPanel(project: Project): ChatPanel? =
-            ChatPanelService.getInstance(project).panel
+        fun getPanel(project: Project): ChatPanel? = ChatPanelService.getInstance(project).panel
     }
 
-    override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
+    override fun createToolWindowContent(
+        project: Project,
+        toolWindow: ToolWindow,
+    ) {
         val panel = ChatPanel(project)
         ChatPanelService.getInstance(project).panel = panel
 

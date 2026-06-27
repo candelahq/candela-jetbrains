@@ -15,8 +15,9 @@ import com.intellij.openapi.wm.ToolWindowManager
  * Prompts the user for a question about the selected code,
  * then opens the Candela Chat tool window and sends the query.
  */
-class AskCandelaAction : AnAction(), DumbAware {
-
+class AskCandelaAction :
+    AnAction(),
+    DumbAware {
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
     override fun actionPerformed(e: AnActionEvent) {
@@ -24,12 +25,13 @@ class AskCandelaAction : AnAction(), DumbAware {
         val editor = e.getData(CommonDataKeys.EDITOR) ?: return
         val selectedText = editor.selectionModel.selectedText ?: return
 
-        val question = Messages.showInputDialog(
-            project,
-            "What would you like to ask about this code?",
-            "Ask Candela",
-            null,
-        ) ?: return
+        val question =
+            Messages.showInputDialog(
+                project,
+                "What would you like to ask about this code?",
+                "Ask Candela",
+                null,
+            ) ?: return
 
         if (question.isBlank()) return
 
@@ -40,8 +42,10 @@ class AskCandelaAction : AnAction(), DumbAware {
         val message = "Question about this code from `$fileName`:\n\n```$lang\n$selectedText\n```\n\n$question"
 
         // Open the tool window and send
-        val toolWindow = ToolWindowManager.getInstance(project)
-            .getToolWindow(ChatToolWindowFactory.TOOL_WINDOW_ID) ?: return
+        val toolWindow =
+            ToolWindowManager
+                .getInstance(project)
+                .getToolWindow(ChatToolWindowFactory.TOOL_WINDOW_ID) ?: return
         toolWindow.show {
             ChatToolWindowFactory.getPanel(project)?.sendMessage(message)
         }
@@ -51,7 +55,9 @@ class AskCandelaAction : AnAction(), DumbAware {
         val project = e.project
         val editor = e.getData(CommonDataKeys.EDITOR)
         e.presentation.isEnabledAndVisible =
-            project != null && !project.isDisposed &&
-            editor != null && editor.selectionModel.hasSelection()
+            project != null &&
+            !project.isDisposed &&
+            editor != null &&
+            editor.selectionModel.hasSelection()
     }
 }

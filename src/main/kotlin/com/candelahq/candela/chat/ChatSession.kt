@@ -13,7 +13,6 @@ import java.util.concurrent.atomic.AtomicBoolean
  * via [cancelled] (AtomicBoolean) and volatile [isStreaming].
  */
 class ChatSession {
-
     private val _messages = CopyOnWriteArrayList<ChatMessage>()
 
     /** Immutable snapshot of the conversation history (excludes system prompt). */

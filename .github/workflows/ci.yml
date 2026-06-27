@@ -19,6 +19,9 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Lint
+        run: ./gradlew ktlintCheck
+
       - name: Build plugin
         run: ./gradlew buildPlugin
 

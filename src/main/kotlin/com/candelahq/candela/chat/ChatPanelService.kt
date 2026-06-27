@@ -10,13 +10,13 @@ import com.intellij.openapi.project.Project
  * [ChatToolWindowFactory], providing thread-safe, lifecycle-aware access.
  */
 @Service(Service.Level.PROJECT)
-class ChatPanelService(private val project: Project) {
-
+class ChatPanelService(
+    private val project: Project,
+) {
     var panel: ChatPanel? = null
         internal set
 
     companion object {
-        fun getInstance(project: Project): ChatPanelService =
-            project.getService(ChatPanelService::class.java)
+        fun getInstance(project: Project): ChatPanelService = project.getService(ChatPanelService::class.java)
     }
 }

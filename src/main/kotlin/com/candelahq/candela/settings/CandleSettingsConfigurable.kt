@@ -1,15 +1,27 @@
 package com.candelahq.candela.settings
 
 import com.intellij.openapi.options.Configurable
-import javax.swing.*
+import javax.swing.BorderFactory
+import javax.swing.Box
+import javax.swing.BoxLayout
+import javax.swing.JCheckBox
+import javax.swing.JComponent
+import javax.swing.JLabel
+import javax.swing.JPanel
+import javax.swing.JScrollPane
+import javax.swing.JSeparator
+import javax.swing.JSpinner
+import javax.swing.JTextArea
+import javax.swing.JTextField
+import javax.swing.SpinnerNumberModel
 
 class CandleSettingsConfigurable : Configurable {
-
     private var panel: JPanel? = null
     private var serverUrlField: JTextField? = null
     private var statusBarEnabledCheckbox: JCheckBox? = null
     private var refreshIntervalField: JSpinner? = null
     private var budgetThresholdField: JSpinner? = null
+
     // Chat settings fields
     private var chatServerUrlField: JTextField? = null
     private var systemPromptArea: JTextArea? = null
@@ -26,73 +38,81 @@ class CandleSettingsConfigurable : Configurable {
         budgetThresholdField = JSpinner(SpinnerNumberModel(settings.budgetWarningThreshold, 0, 100, 5))
 
         chatServerUrlField = JTextField(settings.chatServerUrl, 30)
-        systemPromptArea = JTextArea(settings.systemPrompt, 3, 40).apply {
-            lineWrap = true
-            wrapStyleWord = true
-        }
+        systemPromptArea =
+            JTextArea(settings.systemPrompt, 3, 40).apply {
+                lineWrap = true
+                wrapStyleWord = true
+            }
         maxTokensField = JSpinner(SpinnerNumberModel(settings.maxTokens, 256, 32768, 256))
 
-        panel = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            border = BorderFactory.createEmptyBorder(10, 10, 10, 10)
+        panel =
+            JPanel().apply {
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                border = BorderFactory.createEmptyBorder(10, 10, 10, 10)
 
-            // ── Dashboard Settings ──
-            add(sectionLabel("Dashboard"))
-            add(Box.createVerticalStrut(4))
-            add(labeledRow("Server URL:", serverUrlField!!))
-            add(Box.createVerticalStrut(8))
-            add(statusBarEnabledCheckbox)
-            add(Box.createVerticalStrut(8))
-            add(labeledRow("Refresh interval (seconds):", refreshIntervalField!!))
-            add(Box.createVerticalStrut(8))
-            add(labeledRow("Budget warning threshold (%):", budgetThresholdField!!))
+                // ── Dashboard Settings ──
+                add(sectionLabel("Dashboard"))
+                add(Box.createVerticalStrut(4))
+                add(labeledRow("Server URL:", serverUrlField!!))
+                add(Box.createVerticalStrut(8))
+                add(statusBarEnabledCheckbox)
+                add(Box.createVerticalStrut(8))
+                add(labeledRow("Refresh interval (seconds):", refreshIntervalField!!))
+                add(Box.createVerticalStrut(8))
+                add(labeledRow("Budget warning threshold (%):", budgetThresholdField!!))
 
-            // ── Chat Settings ──
-            add(Box.createVerticalStrut(16))
-            add(JSeparator().apply {
-                maximumSize = java.awt.Dimension(Int.MAX_VALUE, 1)
-                alignmentX = JPanel.LEFT_ALIGNMENT
-            })
-            add(Box.createVerticalStrut(8))
-            add(sectionLabel("Chat"))
-            add(Box.createVerticalStrut(4))
-            add(labeledRow("Chat server URL:", chatServerUrlField!!))
-            add(Box.createVerticalStrut(8))
-            add(labeledRow("Max tokens:", maxTokensField!!))
-            add(Box.createVerticalStrut(8))
-            add(JLabel("System prompt:").apply { alignmentX = JPanel.LEFT_ALIGNMENT })
-            add(Box.createVerticalStrut(4))
-            add(JScrollPane(systemPromptArea).apply {
-                alignmentX = JPanel.LEFT_ALIGNMENT
-                maximumSize = java.awt.Dimension(Int.MAX_VALUE, 80)
-            })
-        }
+                // ── Chat Settings ──
+                add(Box.createVerticalStrut(16))
+                add(
+                    JSeparator().apply {
+                        maximumSize = java.awt.Dimension(Int.MAX_VALUE, 1)
+                        alignmentX = JPanel.LEFT_ALIGNMENT
+                    },
+                )
+                add(Box.createVerticalStrut(8))
+                add(sectionLabel("Chat"))
+                add(Box.createVerticalStrut(4))
+                add(labeledRow("Chat server URL:", chatServerUrlField!!))
+                add(Box.createVerticalStrut(8))
+                add(labeledRow("Max tokens:", maxTokensField!!))
+                add(Box.createVerticalStrut(8))
+                add(JLabel("System prompt:").apply { alignmentX = JPanel.LEFT_ALIGNMENT })
+                add(Box.createVerticalStrut(4))
+                add(
+                    JScrollPane(systemPromptArea).apply {
+                        alignmentX = JPanel.LEFT_ALIGNMENT
+                        maximumSize = java.awt.Dimension(Int.MAX_VALUE, 80)
+                    },
+                )
+            }
         return panel!!
     }
 
     override fun isModified(): Boolean {
         val settings = CandleSettings.getInstance().state
         return serverUrlField?.text != settings.serverUrl ||
-                statusBarEnabledCheckbox?.isSelected != settings.statusBarEnabled ||
-                (refreshIntervalField?.value as? Int) != settings.autoRefreshIntervalSeconds ||
-                (budgetThresholdField?.value as? Int) != settings.budgetWarningThreshold ||
-                chatServerUrlField?.text != settings.chatServerUrl ||
-                systemPromptArea?.text != settings.systemPrompt ||
-                (maxTokensField?.value as? Int) != settings.maxTokens
+            statusBarEnabledCheckbox?.isSelected != settings.statusBarEnabled ||
+            (refreshIntervalField?.value as? Int) != settings.autoRefreshIntervalSeconds ||
+            (budgetThresholdField?.value as? Int) != settings.budgetWarningThreshold ||
+            chatServerUrlField?.text != settings.chatServerUrl ||
+            systemPromptArea?.text != settings.systemPrompt ||
+            (maxTokensField?.value as? Int) != settings.maxTokens
     }
 
     override fun apply() {
         val settings = CandleSettings.getInstance()
-        settings.loadState(CandleSettings.State(
-            serverUrl = serverUrlField?.text ?: "http://localhost:8181",
-            statusBarEnabled = statusBarEnabledCheckbox?.isSelected ?: true,
-            autoRefreshIntervalSeconds = (refreshIntervalField?.value as? Int) ?: 60,
-            budgetWarningThreshold = (budgetThresholdField?.value as? Int) ?: 80,
-            chatServerUrl = chatServerUrlField?.text ?: "http://127.0.0.1:1234",
-            defaultModel = settings.state.defaultModel, // Preserve — set by ChatPanel
-            systemPrompt = systemPromptArea?.text ?: "You are a helpful coding assistant working inside a JetBrains IDE.",
-            maxTokens = (maxTokensField?.value as? Int) ?: 4096,
-        ))
+        settings.loadState(
+            CandleSettings.State(
+                serverUrl = serverUrlField?.text ?: "http://localhost:8181",
+                statusBarEnabled = statusBarEnabledCheckbox?.isSelected ?: true,
+                autoRefreshIntervalSeconds = (refreshIntervalField?.value as? Int) ?: 60,
+                budgetWarningThreshold = (budgetThresholdField?.value as? Int) ?: 80,
+                chatServerUrl = chatServerUrlField?.text ?: "http://127.0.0.1:1234",
+                defaultModel = settings.state.defaultModel, // Preserve — set by ChatPanel
+                systemPrompt = systemPromptArea?.text ?: "You are a helpful coding assistant working inside a JetBrains IDE.",
+                maxTokens = (maxTokensField?.value as? Int) ?: 4096,
+            ),
+        )
     }
 
     override fun reset() {
@@ -106,7 +126,10 @@ class CandleSettingsConfigurable : Configurable {
         maxTokensField?.value = settings.maxTokens
     }
 
-    private fun labeledRow(label: String, component: JComponent): JPanel =
+    private fun labeledRow(
+        label: String,
+        component: JComponent,
+    ): JPanel =
         JPanel().apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
             alignmentX = JPanel.LEFT_ALIGNMENT
