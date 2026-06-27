@@ -19,10 +19,6 @@
                 id="com.candelahq.candela.settings"
                 displayName="Candela"/>
 
-        <!-- ChatPanel project-level service -->
-        <projectService
-                serviceImplementation="com.candelahq.candela.chat.ChatPanelService"/>
-
         <!-- Startup activity to check health -->
         <postStartupActivity
                 implementation="com.candelahq.candela.CandleStartupActivity"/>

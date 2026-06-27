@@ -63,3 +63,22 @@ class RefreshStatusAction : AnAction() {
         widget?.forceRefresh()
     }
 }
+
+/**
+ * Build a fenced code block that safely handles code containing backticks.
+ *
+ * If the code contains triple backticks, the fence uses more backticks
+ * (e.g. ``````) to avoid premature closing.
+ */
+fun buildCodeFence(
+    code: String,
+    lang: String = "",
+): String {
+    var fenceLength = 3
+    val backtickRun = Regex("`{3,}")
+    for (match in backtickRun.findAll(code)) {
+        fenceLength = maxOf(fenceLength, match.value.length + 1)
+    }
+    val fence = "`".repeat(fenceLength)
+    return "$fence$lang\n$code\n$fence"
+}

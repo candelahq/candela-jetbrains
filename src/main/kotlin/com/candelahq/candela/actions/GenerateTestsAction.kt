@@ -27,7 +27,7 @@ class GenerateTestsAction :
         val lang = psiFile?.language?.id?.lowercase() ?: e.getData(CommonDataKeys.VIRTUAL_FILE)?.extension ?: ""
         val fileName = psiFile?.name ?: e.getData(CommonDataKeys.VIRTUAL_FILE)?.name ?: "unknown"
 
-        val message = "Write unit tests for this code from `$fileName`:\n\n```$lang\n$selectedText\n```"
+        val message = "Write unit tests for this code from `$fileName`:\n\n${buildCodeFence(selectedText, lang)}"
 
         val toolWindow =
             ToolWindowManager

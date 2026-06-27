@@ -23,6 +23,7 @@ import java.awt.Font
 import java.awt.datatransfer.StringSelection
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
+import java.util.concurrent.atomic.AtomicLong
 import javax.swing.BorderFactory
 import javax.swing.BoxLayout
 import javax.swing.JButton
@@ -84,11 +85,12 @@ class ChatPanel(
 
     // Thread-safe buffer for accumulating streaming tokens.
     // Written on the pooled thread, read on EDT — StringBuffer is synchronized.
+    @Volatile
     private var streamingContent = StringBuffer()
 
     // Throttle UI updates during streaming to avoid O(n²) re-rendering.
     // Tracks the last time we dispatched an updateStreamingBubble() call to the EDT.
-    private var lastUiUpdateMs = 0L
+    private val lastUiUpdateMs = AtomicLong(0L)
 
     private var disposed = false
 
@@ -119,6 +121,7 @@ class ChatPanel(
             session.cancelStreaming()
         }
         streamingTextPane = null
+        ChatPanelService.getInstance(project).panel = null
         log.info("ChatPanel disposed for project: ${project.name}")
     }
 
@@ -194,12 +197,19 @@ class ChatPanel(
     // ── Actions ──────────────────────────────────────────────────────────
 
     private fun doSend() {
-        val text = inputArea.text.trim()
-        if (text.isEmpty()) return
         if (session.isStreaming) {
             // Button is in "Stop" mode
             session.cancelStreaming()
             sendButton.text = "Send"
+            return
+        }
+
+        val text = inputArea.text.trim()
+        if (text.isEmpty()) return
+
+        val model = modelSelector.selectedItem as? String ?: ""
+        if (model.isEmpty() || model.startsWith("(")) {
+            addErrorMessage("No valid model selected. Please check your connection and refresh.")
             return
         }
 
@@ -211,21 +221,18 @@ class ChatPanel(
         session.startStreaming()
         sendButton.text = "Stop"
         streamingContent = StringBuffer()
-        lastUiUpdateMs = 0L
+        lastUiUpdateMs.set(0L)
 
         val assistantPane = addAssistantBubble("")
         streamingTextPane = assistantPane
 
         val settings = CandleSettings.getInstance().state
         val baseUrl = settings.chatServerUrl
-        val model = modelSelector.selectedItem as? String ?: ""
         val messages = session.buildRequestMessages()
         val maxTokens = settings.maxTokens
 
         // Save model selection
-        if (model.isNotEmpty()) {
-            settings.defaultModel = model
-        }
+        settings.defaultModel = model
 
         log.info("Sending chat request: model=$model, messages=${messages.size}")
 
@@ -240,8 +247,8 @@ class ChatPanel(
                     streamingContent.append(token)
                     // Throttle UI updates: render at most every STREAM_THROTTLE_MS
                     val now = System.currentTimeMillis()
-                    if (now - lastUiUpdateMs >= STREAM_THROTTLE_MS) {
-                        lastUiUpdateMs = now
+                    if (now - lastUiUpdateMs.get() >= STREAM_THROTTLE_MS) {
+                        lastUiUpdateMs.set(now)
                         val snapshot = streamingContent.toString()
                         SwingUtilities.invokeLater {
                             if (!disposed) {

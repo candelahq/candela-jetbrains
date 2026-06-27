@@ -86,7 +86,7 @@ data class ChatCompletionChunk(
     val `object`: String = "",
     val created: Long = 0,
     val model: String = "",
-    val choices: List<ChunkChoice> = emptyList(),
+    val choices: List<ChunkChoice>? = emptyList(),
     val usage: ChunkUsage? = null,
 )
 

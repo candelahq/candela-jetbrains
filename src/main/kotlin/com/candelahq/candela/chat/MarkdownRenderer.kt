@@ -17,6 +17,8 @@ object MarkdownRenderer {
     private val HEADING3 = Regex("^###\\s+(.+)$", RegexOption.MULTILINE)
     private val HEADING2 = Regex("^##\\s+(.+)$", RegexOption.MULTILINE)
     private val HEADING1 = Regex("^#\\s+(.+)$", RegexOption.MULTILINE)
+    private val ORDERED_LIST_ITEM = Regex("^\\d+\\.\\s+.*")
+    private val ORDERED_LIST_PREFIX = Regex("^\\d+\\.\\s+")
 
     /**
      * Render markdown text to an HTML fragment (no <html>/<body> wrapper).
@@ -36,29 +38,43 @@ object MarkdownRenderer {
         // Step 2: Escape HTML entities in non-code text
         processed = escapeHtml(processed)
 
-        // Step 3: Apply inline formatting
-        processed = BOLD.replace(processed) { "<b>${it.groupValues[1]}</b>" }
-        processed = ITALIC.replace(processed) { "<i>${it.groupValues[1]}</i>" }
+        // Step 3: Protect inline code before applying emphasis
+        val inlineCodeBlocks = mutableListOf<String>()
         processed =
-            INLINE_CODE.replace(processed) {
-                "<code style=\"background-color: ${colorToHex(inlineCodeBg())}; " +
-                    "padding: 1px 4px; border-radius: 3px; font-family: monospace;\">" +
-                    "${it.groupValues[1]}</code>"
+            INLINE_CODE.replace(processed) { match ->
+                val index = inlineCodeBlocks.size
+                inlineCodeBlocks.add(match.groupValues[1])
+                "\u0000INLINECODE_$index\u0000"
             }
 
-        // Step 4: Headings
+        // Step 4: Apply inline formatting (safe — inline code is protected)
+        processed = BOLD.replace(processed) { "<b>${it.groupValues[1]}</b>" }
+        processed = ITALIC.replace(processed) { "<i>${it.groupValues[1]}</i>" }
+
+        // Step 5: Restore inline code
+        for ((index, code) in inlineCodeBlocks.withIndex()) {
+            processed =
+                processed.replace(
+                    "\u0000INLINECODE_$index\u0000",
+                    "<code style=\"background-color: ${colorToHex(inlineCodeBg())}; " +
+                        "padding: 1px 4px; border-radius: 3px; font-family: monospace;\">" +
+                        "$code</code>",
+                )
+        }
+
+        // Step 6: Headings
         processed = HEADING3.replace(processed) { "<h5 style=\"margin: 8px 0 4px 0;\">${it.groupValues[1]}</h5>" }
         processed = HEADING2.replace(processed) { "<h4 style=\"margin: 10px 0 4px 0;\">${it.groupValues[1]}</h4>" }
         processed = HEADING1.replace(processed) { "<h3 style=\"margin: 12px 0 6px 0;\">${it.groupValues[1]}</h3>" }
 
-        // Step 5: Lists — convert contiguous lines starting with "- " or "* " or "1. "
+        // Step 7: Lists — convert contiguous lines starting with "- " or "* " or "1. "
         processed = processLists(processed)
 
-        // Step 6: Paragraphs / line breaks
+        // Step 8: Paragraphs / line breaks
         processed = processed.replace("\n\n", "</p><p style=\"margin: 4px 0;\">")
         processed = processed.replace("\n", "<br>")
 
-        // Step 7: Restore code blocks
+        // Step 9: Restore code blocks
         for ((index, block) in codeBlocks.withIndex()) {
             val (lang, code) = block
             val langLabel =
@@ -139,7 +155,7 @@ object MarkdownRenderer {
                     }
                     result.append("<li>${trimmed.removePrefix("- ").removePrefix("* ")}</li>")
                 }
-                trimmed.matches(Regex("^\\d+\\.\\s+.*")) -> {
+                trimmed.matches(ORDERED_LIST_ITEM) -> {
                     if (!inOl) {
                         if (inUl) {
                             result.append("</ul>")
@@ -148,7 +164,7 @@ object MarkdownRenderer {
                         result.append("<ol>")
                         inOl = true
                     }
-                    val content = trimmed.replaceFirst(Regex("^\\d+\\.\\s+"), "")
+                    val content = trimmed.replaceFirst(ORDERED_LIST_PREFIX, "")
                     result.append("<li>$content</li>")
                 }
                 else -> {

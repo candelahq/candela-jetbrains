@@ -1,6 +1,8 @@
 package com.candelahq.candela.settings
 
 import com.intellij.openapi.options.Configurable
+import com.intellij.openapi.options.ConfigurationException
+import java.net.URI
 import javax.swing.BorderFactory
 import javax.swing.Box
 import javax.swing.BoxLayout
@@ -99,7 +101,20 @@ class CandleSettingsConfigurable : Configurable {
             (maxTokensField?.value as? Int) != settings.maxTokens
     }
 
+    @Throws(ConfigurationException::class)
     override fun apply() {
+        val chatUrl = chatServerUrlField?.text?.trim() ?: ""
+        if (chatUrl.isNotEmpty()) {
+            try {
+                val uri = URI.create(chatUrl)
+                if (uri.scheme == null || uri.host == null) {
+                    throw ConfigurationException("Chat server URL must include scheme and host (e.g. http://127.0.0.1:1234)")
+                }
+            } catch (e: IllegalArgumentException) {
+                throw ConfigurationException("Invalid chat server URL: ${e.message}")
+            }
+        }
+
         val settings = CandleSettings.getInstance()
         settings.loadState(
             CandleSettings.State(
@@ -107,7 +122,7 @@ class CandleSettingsConfigurable : Configurable {
                 statusBarEnabled = statusBarEnabledCheckbox?.isSelected ?: true,
                 autoRefreshIntervalSeconds = (refreshIntervalField?.value as? Int) ?: 60,
                 budgetWarningThreshold = (budgetThresholdField?.value as? Int) ?: 80,
-                chatServerUrl = chatServerUrlField?.text ?: "http://127.0.0.1:1234",
+                chatServerUrl = chatUrl.ifEmpty { "http://127.0.0.1:1234" },
                 defaultModel = settings.state.defaultModel, // Preserve — set by ChatPanel
                 systemPrompt = systemPromptArea?.text ?: "You are a helpful coding assistant working inside a JetBrains IDE.",
                 maxTokens = (maxTokensField?.value as? Int) ?: 4096,

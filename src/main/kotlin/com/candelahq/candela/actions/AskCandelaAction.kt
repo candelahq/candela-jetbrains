@@ -39,7 +39,7 @@ class AskCandelaAction :
         val lang = psiFile?.language?.id?.lowercase() ?: e.getData(CommonDataKeys.VIRTUAL_FILE)?.extension ?: ""
         val fileName = psiFile?.name ?: e.getData(CommonDataKeys.VIRTUAL_FILE)?.name ?: "unknown"
 
-        val message = "Question about this code from `$fileName`:\n\n```$lang\n$selectedText\n```\n\n$question"
+        val message = "Question about this code from `$fileName`:\n\n${buildCodeFence(selectedText, lang)}\n\n$question"
 
         // Open the tool window and send
         val toolWindow =

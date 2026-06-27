@@ -135,18 +135,19 @@ class ChatClient {
 
                     try {
                         val chunk = gson.fromJson(data, ChatCompletionChunk::class.java)
+                        if (chunk != null) {
+                            // Capture usage if present (usually in the final chunk)
+                            if (chunk.usage != null) {
+                                lastUsage = chunk.usage
+                            }
 
-                        // Capture usage if present (usually in the final chunk)
-                        if (chunk.usage != null) {
-                            lastUsage = chunk.usage
-                        }
+                            // Extract content delta — null-safe for all the quirks
+                            val choice = chunk.choices?.firstOrNull()
+                            val content = choice?.delta?.content ?: ""
 
-                        // Extract content delta — null-safe for all the quirks
-                        val choice = chunk.choices.firstOrNull()
-                        val content = choice?.delta?.content ?: ""
-
-                        if (content.isNotEmpty()) {
-                            onToken(content)
+                            if (content.isNotEmpty()) {
+                                onToken(content)
+                            }
                         }
                     } catch (e: Exception) {
                         log.warn("Malformed SSE chunk: ${data.take(200)}", e)
