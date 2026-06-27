@@ -61,5 +61,5 @@ body:
     id: logs
     attributes:
       label: Relevant Logs
-      description: Paste relevant log output from Help → Show Log in Finder (will be auto-formatted as code).
+      description: Paste relevant log output from Help → Show Log in Explorer/Finder (will be auto-formatted as code).
       render: shell

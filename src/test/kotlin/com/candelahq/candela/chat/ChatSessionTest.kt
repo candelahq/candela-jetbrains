@@ -49,13 +49,15 @@ class ChatSessionTest {
     fun `streaming state transitions`() {
         val session = ChatSession()
         assertFalse(session.isStreaming, "Should not be streaming initially")
+        assertFalse(session.cancelled.get(), "Should not be cancelled initially")
 
         session.startStreaming()
         assertTrue(session.isStreaming, "Should be streaming after start")
         assertFalse(session.cancelled.get(), "Should not be cancelled after start")
 
         session.cancelStreaming()
-        assertTrue(session.cancelled.get(), "Should be cancelled")
+        assertTrue(session.cancelled.get(), "Should be cancelled after cancel")
+        assertFalse(session.isStreaming, "Should not be streaming after cancel")
 
         session.stopStreaming()
         assertFalse(session.isStreaming, "Should not be streaming after stop")
@@ -67,10 +69,16 @@ class ChatSessionTest {
         session.addUserMessage("hello")
         session.addAssistantMessage("world")
         session.startStreaming()
+        session.cancelStreaming()
+
+        // Preconditions — state is dirty
+        assertEquals(2, session.messages.size, "Should have 2 messages before clear")
+        assertTrue(session.cancelled.get(), "Should be cancelled before clear")
 
         session.clear()
         assertTrue(session.messages.isEmpty(), "Messages should be cleared")
         assertFalse(session.isStreaming, "Streaming should be stopped")
+        assertFalse(session.cancelled.get(), "Cancelled should be reset")
     }
 
     @Test

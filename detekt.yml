@@ -46,8 +46,6 @@ potential-bugs:
 exceptions:
   SwallowedException:
     active: true
-  TooGenericExceptionCaught:
-    active: false  # We catch Exception in SSE parsing intentionally
 
 performance:
   active: true

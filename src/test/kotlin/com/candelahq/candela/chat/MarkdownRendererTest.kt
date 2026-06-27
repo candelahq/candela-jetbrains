@@ -63,12 +63,16 @@ class MarkdownRendererTest {
     fun `headings render correctly`() {
         val result1 = MarkdownRenderer.renderToHtml("# Heading 1")
         assertTrue(result1.contains("<h3"), "Expected h3 for # heading, got: $result1")
+        assertTrue(result1.contains("Heading 1"), "Expected heading text, got: $result1")
+        assertFalse(result1.contains("<p><h3"), "Heading should not be wrapped in <p>, got: $result1")
 
         val result2 = MarkdownRenderer.renderToHtml("## Heading 2")
         assertTrue(result2.contains("<h4"), "Expected h4 for ## heading, got: $result2")
+        assertFalse(result2.contains("<p><h4"), "Heading should not be wrapped in <p>, got: $result2")
 
         val result3 = MarkdownRenderer.renderToHtml("### Heading 3")
         assertTrue(result3.contains("<h5"), "Expected h5 for ### heading, got: $result3")
+        assertFalse(result3.contains("<p><h5"), "Heading should not be wrapped in <p>, got: $result3")
     }
 
     @Test
@@ -77,6 +81,9 @@ class MarkdownRendererTest {
         val result = MarkdownRenderer.renderToHtml(md)
         assertTrue(result.contains("<ul>"), "Expected ul tag, got: $result")
         assertTrue(result.contains("<li>item 1</li>"), "Expected li tag, got: $result")
+        assertTrue(result.contains("<li>item 2</li>"), "Expected second li tag, got: $result")
+        assertTrue(result.contains("<li>item 3</li>"), "Expected third li tag, got: $result")
+        assertFalse(result.contains("<p><ul>"), "List should not be wrapped in <p>, got: $result")
     }
 
     @Test
@@ -85,6 +92,9 @@ class MarkdownRendererTest {
         val result = MarkdownRenderer.renderToHtml(md)
         assertTrue(result.contains("<ol>"), "Expected ol tag, got: $result")
         assertTrue(result.contains("<li>first</li>"), "Expected li tag, got: $result")
+        assertTrue(result.contains("<li>second</li>"), "Expected second li tag, got: $result")
+        assertTrue(result.contains("<li>third</li>"), "Expected third li tag, got: $result")
+        assertFalse(result.contains("<p><ol>"), "List should not be wrapped in <p>, got: $result")
     }
 
     @Test
