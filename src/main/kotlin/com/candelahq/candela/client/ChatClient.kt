@@ -2,6 +2,7 @@ package com.candelahq.candela.client
 
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.intellij.openapi.diagnostic.Logger
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.URI
@@ -19,6 +20,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class ChatClient {
 
+    private val LOG = Logger.getInstance(ChatClient::class.java)
+
     private val client = HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(10))
         .build()
@@ -30,6 +33,7 @@ class ChatClient {
      * @return list of model info, empty on error
      */
     fun fetchModels(baseUrl: String): List<ModelInfo> {
+        LOG.info("Fetching models from ${baseUrl.trimEnd('/')}")
         return try {
             val request = HttpRequest.newBuilder()
                 .uri(URI.create("${baseUrl.trimEnd('/')}/v1/models"))
@@ -44,7 +48,8 @@ class ChatClient {
             } else {
                 emptyList()
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            LOG.warn("Failed to fetch models", e)
             emptyList()
         }
     }
@@ -75,6 +80,7 @@ class ChatClient {
         onError: (Exception) -> Unit,
     ) {
         try {
+            LOG.info("Starting chat stream: model=$model, maxTokens=$maxTokens")
             val body = buildRequestBody(model, messages, maxTokens)
 
             val request = HttpRequest.newBuilder()
@@ -114,6 +120,7 @@ class ChatClient {
                     }
 
                     val data = line.removePrefix("data: ").removePrefix("data:").trim()
+                    LOG.debug("SSE data: ${data.take(200)}")
 
                     // Stream terminator
                     if (data == "[DONE]") {
@@ -136,19 +143,26 @@ class ChatClient {
                         if (content.isNotEmpty()) {
                             onToken(content)
                         }
-                    } catch (_: Exception) {
-                        // Skip malformed chunks silently
+                    } catch (e: Exception) {
+                        LOG.warn("Malformed SSE chunk: ${data.take(200)}", e)
                     }
 
                     line = reader.readLine()
                 }
             }
 
-            // Signal completion if not cancelled
+            // Signal completion or premature EOF
             if (!cancelled.get()) {
-                onComplete(lastUsage)
+                if (doneReceived) {
+                    LOG.info("Chat stream complete: ${lastUsage?.total_tokens ?: "?"} tokens")
+                    onComplete(lastUsage)
+                } else {
+                    LOG.warn("Chat stream ended without [DONE] marker")
+                    onError(RuntimeException("Stream ended unexpectedly — response may be incomplete"))
+                }
             }
         } catch (e: Exception) {
+            LOG.error("Chat stream failed", e)
             if (!cancelled.get()) {
                 onError(e)
             }
@@ -164,6 +178,9 @@ class ChatClient {
             addProperty("model", model)
             addProperty("stream", true)
             addProperty("max_tokens", maxTokens)
+
+            val streamOptions = JsonObject().apply { addProperty("include_usage", true) }
+            add("stream_options", streamOptions)
 
             val messagesArray = com.google.gson.JsonArray()
             for (msg in messages) {
