@@ -448,7 +448,7 @@ class ChatPanel(
     }
 
     private fun addTokenInfo(usage: ChunkUsage) {
-        val info = "Tokens: ${usage.prompt_tokens} in / ${usage.completion_tokens} out / ${usage.total_tokens} total"
+        val info = "Tokens: ${usage.promptTokens} in / ${usage.completionTokens} out / ${usage.totalTokens} total"
         val label =
             JLabel(info).apply {
                 font = font.deriveFont(10f)

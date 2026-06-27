@@ -1,0 +1,54 @@
+# Detekt configuration for Candela JetBrains plugin.
+#
+# Starting with warn-only for most rules. Tighten over time as the
+# codebase matures and test coverage improves.
+#
+# Reference: https://detekt.dev/docs/rules/
+
+build:
+  maxIssues: -1  # Warn-only: don't fail the build on detekt findings (for now)
+
+complexity:
+  LongMethod:
+    threshold: 80  # Chat panel methods are legitimately long (UI construction)
+  LongParameterList:
+    functionThreshold: 8  # streamChat has many params by design
+  TooManyFunctions:
+    thresholdInClasses: 25  # ChatPanel has many UI methods
+  CyclomaticComplexMethod:
+    threshold: 20
+  NestedBlockDepth:
+    threshold: 5
+
+style:
+  MagicNumber:
+    active: false  # Too noisy for UI code with layout constants
+  ReturnCount:
+    max: 5
+  WildcardImport:
+    active: false  # ktlint already handles this
+  MaxLineLength:
+    maxLineLength: 140  # Allow slightly longer lines for HTML strings
+  UnnecessaryAbstractClass:
+    active: false
+
+naming:
+  FunctionNaming:
+    active: true
+  VariableNaming:
+    active: true
+  TopLevelPropertyNaming:
+    constantPattern: "[A-Za-z][_A-Za-z0-9]*"
+
+potential-bugs:
+  active: true
+
+exceptions:
+  SwallowedException:
+    active: true
+
+performance:
+  active: true
+
+empty-blocks:
+  active: true

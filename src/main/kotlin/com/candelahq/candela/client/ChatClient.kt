@@ -109,6 +109,7 @@ class ChatClient {
 
             BufferedReader(InputStreamReader(response.body(), Charsets.UTF_8)).use { reader ->
                 var line = reader.readLine()
+                @Suppress("LoopWithTooManyJumpStatements") // SSE protocol parsing: skip blanks, skip non-data, handle [DONE] + cancel
                 while (line != null) {
                     if (cancelled.get()) break
 
@@ -149,7 +150,10 @@ class ChatClient {
                                 onToken(content)
                             }
                         }
-                    } catch (e: Exception) {
+                    } catch (
+                        @Suppress("TooGenericExceptionCaught")
+                        e: Exception,
+                    ) {
                         log.warn("Malformed SSE chunk: ${data.take(200)}", e)
                     }
 
@@ -160,14 +164,17 @@ class ChatClient {
             // Signal completion or premature EOF
             if (!cancelled.get()) {
                 if (doneReceived) {
-                    log.info("Chat stream complete: ${lastUsage?.total_tokens ?: "?"} tokens")
+                    log.info("Chat stream complete: ${lastUsage?.totalTokens ?: "?"} tokens")
                     onComplete(lastUsage)
                 } else {
                     log.warn("Chat stream ended without [DONE] marker")
                     onError(RuntimeException("Stream ended unexpectedly — response may be incomplete"))
                 }
             }
-        } catch (e: Exception) {
+        } catch (
+            @Suppress("TooGenericExceptionCaught")
+            e: Exception,
+        ) {
             log.error("Chat stream failed", e)
             if (!cancelled.get()) {
                 onError(e)

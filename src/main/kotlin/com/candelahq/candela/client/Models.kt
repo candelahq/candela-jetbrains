@@ -1,5 +1,6 @@
 package com.candelahq.candela.client
 
+import com.google.gson.annotations.SerializedName
 import java.time.Instant
 
 /** Aggregated usage for a time range. */
@@ -69,21 +70,26 @@ data class ChatMessage(
 /** Model info from GET /v1/models. */
 data class ModelInfo(
     val id: String,
-    val `object`: String = "model",
-    val owned_by: String = "",
-    val max_context_length: Int? = null,
+    @SerializedName("object")
+    val obj: String = "model",
+    @SerializedName("owned_by")
+    val ownedBy: String = "",
+    @SerializedName("max_context_length")
+    val maxContextLength: Int? = null,
 )
 
 /** Response wrapper for GET /v1/models. */
 data class ModelsResponse(
-    val `object`: String = "list",
+    @SerializedName("object")
+    val obj: String = "list",
     val data: List<ModelInfo> = emptyList(),
 )
 
 /** A single SSE chunk from POST /v1/chat/completions (stream=true). */
 data class ChatCompletionChunk(
     val id: String = "",
-    val `object`: String = "",
+    @SerializedName("object")
+    val obj: String = "",
     val created: Long = 0,
     val model: String = "",
     val choices: List<ChunkChoice>? = emptyList(),
@@ -93,7 +99,8 @@ data class ChatCompletionChunk(
 data class ChunkChoice(
     val index: Int = 0,
     val delta: ChunkDelta? = null,
-    val finish_reason: String? = null,
+    @SerializedName("finish_reason")
+    val finishReason: String? = null,
 )
 
 data class ChunkDelta(
@@ -102,7 +109,10 @@ data class ChunkDelta(
 )
 
 data class ChunkUsage(
-    val prompt_tokens: Int = 0,
-    val completion_tokens: Int = 0,
-    val total_tokens: Int = 0,
+    @SerializedName("prompt_tokens")
+    val promptTokens: Int = 0,
+    @SerializedName("completion_tokens")
+    val completionTokens: Int = 0,
+    @SerializedName("total_tokens")
+    val totalTokens: Int = 0,
 )

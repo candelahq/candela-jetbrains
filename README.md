@@ -1,6 +1,8 @@
 # candela-jetbrains
 
-JetBrains IDE plugin for [Candela](https://github.com/candelahq/candela) — real-time LLM cost tracking, budget warnings, and observability dashboard.
+JetBrains IDE plugin for [Candela](https://github.com/candelahq/candela) — LLM chat, real-time cost tracking, budget warnings, and observability dashboard.
+
+[![CI](https://github.com/candelahq/candela-jetbrains/actions/workflows/ci.yml/badge.svg)](https://github.com/candelahq/candela-jetbrains/actions/workflows/ci.yml)
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
@@ -36,16 +38,41 @@ Access from **Tools → Candela**:
 | **Open Dashboard** | Launch the Candela web dashboard |
 | **Refresh Status** | Force refresh status bar data |
 
+### 💬 Chat Tool Window
+
+Streaming LLM chat directly in your IDE:
+
+- **Model selection** — auto-discovers models from your local LLM server (LM Studio, Ollama, etc.)
+- **SSE streaming** — real-time token-by-token responses
+- **Markdown rendering** — fenced code blocks, inline code, bold, italic, headings, lists
+- **Code block actions** — Copy and Insert at Cursor for generated code
+- **Conversation management** — New Chat button to clear history
+
+### ✏️ Editor Context Actions
+
+Right-click selected code → **Candela**:
+
+| Action | Description |
+|--------|-------------|
+| **Ask Candela...** | Ask a question about selected code |
+| **Explain Code** | Get an explanation of selected code |
+| **Generate Tests** | Generate unit tests for selected code |
+
+All actions include the file name and language for context.
+
 ### ⚙️ Settings
 
 Configure under **Settings → Tools → Candela**:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| Server URL | `http://localhost:8181` | Candela server URL |
+| Server URL | `http://localhost:8181` | Candela dashboard server URL |
 | Status bar enabled | `true` | Show cost tracker in status bar |
 | Refresh interval | `60s` | Auto-refresh interval (0 to disable) |
 | Budget warning threshold | `80%` | Warning threshold |
+| Chat server URL | `http://127.0.0.1:1234` | LLM server URL (LM Studio, Ollama, etc.) |
+| System prompt | *(coding assistant)* | Default system prompt for chat |
+| Max tokens | `4096` | Maximum tokens per response |
 
 ---
 
@@ -92,13 +119,24 @@ nix develop
 # Run a sandboxed IDE with the plugin loaded
 nix develop -c ./gradlew runIde
 
+# Lint + static analysis
+nix develop -c ./gradlew ktlintCheck    # formatting
+nix develop -c ./gradlew detekt          # static analysis
+
+# Run tests (41 tests)
+nix develop -c ./gradlew test
+
 # Build the distribution zip
 nix develop -c ./gradlew buildPlugin
 
-# Run tests
-nix develop -c ./gradlew test
+# Verify plugin compatibility
+nix develop -c ./gradlew verifyPlugin
+
+# Auto-fix formatting
+nix develop -c ./gradlew ktlintFormat
 ```
 
+Pre-commit hooks (via [lefthook](https://github.com/evilmartians/lefthook)) run ktlint and other checks automatically. Pre-push hooks run the full Gradle build.
 
 ---
 
