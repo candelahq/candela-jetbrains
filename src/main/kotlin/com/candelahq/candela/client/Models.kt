@@ -2,6 +2,7 @@ package com.candelahq.candela.client
 
 import com.google.gson.annotations.SerializedName
 import java.time.Instant
+import java.util.Locale
 
 /** Aggregated usage for a time range. */
 data class UsageSummary(
@@ -137,7 +138,7 @@ fun ChunkUsage.estimatedCostUsd(model: String): Double? {
     val pricing =
         MODEL_PRICING.entries
             .firstOrNull { (pattern, _) ->
-                model.lowercase().contains(pattern)
+                model.lowercase(Locale.ROOT).contains(pattern)
             }?.value ?: return null
 
     return (promptTokens * pricing.inputPerMillion + completionTokens * pricing.outputPerMillion) / 1_000_000.0
@@ -153,8 +154,8 @@ fun ChunkUsage.estimatedCostUsd(model: String): Double? {
 fun formatCostUsd(cost: Double): String =
     when {
         cost < 0.001 -> "<\$0.001"
-        cost < 0.01 -> "\$%.3f".format(cost)
-        else -> "\$%.2f".format(cost)
+        cost < 0.01 -> "\$%.3f".format(Locale.US, cost)
+        else -> "\$%.2f".format(Locale.US, cost)
     }
 
 /**
