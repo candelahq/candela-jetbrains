@@ -6,6 +6,7 @@ import com.intellij.openapi.diagnostic.Logger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.future.await
 import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
@@ -117,7 +118,7 @@ class ChatClient {
                     .build()
 
             ensureActive()
-            val response = client.send(request, HttpResponse.BodyHandlers.ofInputStream())
+            val response = client.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream()).await()
 
             if (response.statusCode() !in 200..299) {
                 val errorBody = response.body().use { it.bufferedReader().readText().take(1000) }

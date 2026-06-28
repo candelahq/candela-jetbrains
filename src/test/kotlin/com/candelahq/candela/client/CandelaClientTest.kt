@@ -290,7 +290,7 @@ class CandelaClientTest {
         }
 
     @Test
-    fun `getDashboardData returns empty data when all endpoints return errors`() =
+    fun `getDashboardData returns null when all endpoints return errors`() =
         runTest {
             // Use a dispatcher since legacyFanout fires concurrent async requests.
             server.dispatcher =
@@ -315,11 +315,8 @@ class CandelaClientTest {
             val client = CandelaClient(baseUrl)
             val data = client.getDashboardData()
 
-            // Legacy fanout returns an empty DashboardData for 500 responses
-            // (the HTTP calls succeed at the transport level, just no useful data)
-            assertNotNull(data)
-            assertEquals(0, data.usage.totalTokens)
-            assertNull(data.budget)
+            // Legacy fanout returns null when neither endpoint succeeds
+            assertNull(data, "Should return null when all endpoints fail")
         }
 
     @Test

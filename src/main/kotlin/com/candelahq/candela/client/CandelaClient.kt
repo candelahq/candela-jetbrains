@@ -140,8 +140,10 @@ class CandelaClient(
                     )
 
                 var usage = UsageSummary()
+                var hasLegacyData = false
                 val summaryRes = summaryFuture.await()
                 if (summaryRes.statusCode() in 200..299) {
+                    hasLegacyData = true
                     val s = gson.fromJson(summaryRes.body(), JsonObject::class.java)
                     usage = parseUsageSummary(s)
                 }
@@ -152,6 +154,7 @@ class CandelaClient(
 
                 val budgetRes = budgetFuture.await()
                 if (budgetRes.statusCode() in 200..299) {
+                    hasLegacyData = true
                     val b = gson.fromJson(budgetRes.body(), JsonObject::class.java)
                     budget = parseBudget(b.getAsJsonObject("budget"))
                     activeGrants = parseGrants(b.getAsJsonArray("activeGrants") ?: b.getAsJsonArray("active_grants"))
@@ -159,6 +162,7 @@ class CandelaClient(
                     if (raw != null && raw >= 0) totalRemainingUsd = raw
                 }
 
+                if (!hasLegacyData) return@withContext null
                 DashboardData(usage, emptyList(), budget, activeGrants, totalRemainingUsd)
             } catch (e: CancellationException) {
                 throw e
