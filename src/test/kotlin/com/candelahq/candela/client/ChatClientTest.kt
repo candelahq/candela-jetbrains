@@ -2,6 +2,7 @@ package com.candelahq.candela.client
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
@@ -11,13 +12,11 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
-import kotlin.test.fail
 
 /**
- * Tests for [ChatClient] — SSE streaming, model fetching, cancellation.
+ * Tests for [ChatClient] — SSE streaming via Flow, model fetching, cancellation.
  * Uses MockWebServer for realistic HTTP behavior.
  */
 class ChatClientTest {
@@ -82,10 +81,10 @@ class ChatClientTest {
             assertTrue(models.isEmpty())
         }
 
-    // ── streamChat ───────────────────────────────────────────────────────
+    // ── streamChat (Flow) ────────────────────────────────────────────────
 
     @Test
-    fun `streamChat calls onToken for each content delta`() =
+    fun `streamChat emits Token events for each content delta`() =
         runTest {
             val sseBody =
                 """
@@ -104,24 +103,22 @@ class ChatClientTest {
                     .setBody(sseBody),
             )
 
-            val tokens = mutableListOf<String>()
-            var completed = false
-            client.streamChat(
-                baseUrl = baseUrl,
-                model = "test",
-                messages = listOf(ChatMessage("user", "hi")),
-                maxTokens = 100,
-                onToken = { tokens.add(it) },
-                onComplete = { completed = true },
-                onError = { fail("Should not error: ${it.message}") },
-            )
+            val events =
+                client
+                    .streamChat(
+                        baseUrl = baseUrl,
+                        model = "test",
+                        messages = listOf(ChatMessage("user", "hi")),
+                        maxTokens = 100,
+                    ).toList()
 
+            val tokens = events.filterIsInstance<StreamEvent.Token>().map { it.content }
             assertEquals(listOf("Hello", " world"), tokens)
-            assertTrue(completed)
+            assertTrue(events.last() is StreamEvent.Complete)
         }
 
     @Test
-    fun `streamChat reports usage when present`() =
+    fun `streamChat reports usage in Complete event`() =
         runTest {
             val sseBody =
                 """
@@ -140,25 +137,24 @@ class ChatClientTest {
                     .setBody(sseBody),
             )
 
-            var usage: ChunkUsage? = null
-            client.streamChat(
-                baseUrl = baseUrl,
-                model = "test",
-                messages = listOf(ChatMessage("user", "hi")),
-                maxTokens = 100,
-                onToken = {},
-                onComplete = { usage = it },
-                onError = { fail("Should not error") },
-            )
+            val events =
+                client
+                    .streamChat(
+                        baseUrl = baseUrl,
+                        model = "test",
+                        messages = listOf(ChatMessage("user", "hi")),
+                        maxTokens = 100,
+                    ).toList()
 
-            assertNotNull(usage)
-            assertEquals(10, usage!!.promptTokens)
-            assertEquals(5, usage!!.completionTokens)
-            assertEquals(15, usage!!.totalTokens)
+            val complete = events.filterIsInstance<StreamEvent.Complete>().single()
+            assertNotNull(complete.usage)
+            assertEquals(10, complete.usage!!.promptTokens)
+            assertEquals(5, complete.usage!!.completionTokens)
+            assertEquals(15, complete.usage!!.totalTokens)
         }
 
     @Test
-    fun `streamChat calls onError on non-2xx status`() =
+    fun `streamChat emits Error on non-2xx status`() =
         runTest {
             server.enqueue(
                 MockResponse()
@@ -166,19 +162,18 @@ class ChatClientTest {
                     .setBody("Rate limited"),
             )
 
-            var error: Exception? = null
-            client.streamChat(
-                baseUrl = baseUrl,
-                model = "test",
-                messages = listOf(ChatMessage("user", "hi")),
-                maxTokens = 100,
-                onToken = { fail("Should not receive tokens") },
-                onComplete = { fail("Should not complete") },
-                onError = { error = it },
-            )
+            val events =
+                client
+                    .streamChat(
+                        baseUrl = baseUrl,
+                        model = "test",
+                        messages = listOf(ChatMessage("user", "hi")),
+                        maxTokens = 100,
+                    ).toList()
 
-            assertNotNull(error)
-            assertTrue(error!!.message!!.contains("429"))
+            assertEquals(1, events.size)
+            val error = events[0] as StreamEvent.Error
+            assertTrue(error.exception.message!!.contains("429"))
         }
 
     @Test
@@ -203,20 +198,18 @@ class ChatClientTest {
                     .setBody(sseBody),
             )
 
-            val tokens = mutableListOf<String>()
-            var completed = false
-            client.streamChat(
-                baseUrl = baseUrl,
-                model = "test",
-                messages = listOf(ChatMessage("user", "hi")),
-                maxTokens = 100,
-                onToken = { tokens.add(it) },
-                onComplete = { completed = true },
-                onError = { fail("Should not error on malformed chunk") },
-            )
+            val events =
+                client
+                    .streamChat(
+                        baseUrl = baseUrl,
+                        model = "test",
+                        messages = listOf(ChatMessage("user", "hi")),
+                        maxTokens = 100,
+                    ).toList()
 
+            val tokens = events.filterIsInstance<StreamEvent.Token>().map { it.content }
             assertEquals(listOf("good", " end"), tokens, "Should skip malformed chunks")
-            assertTrue(completed)
+            assertTrue(events.last() is StreamEvent.Complete)
         }
 
     @Test
@@ -237,18 +230,18 @@ class ChatClientTest {
                     .setBody(sseBody),
             )
 
-            val tokens = mutableListOf<String>()
-            client.streamChat(
-                baseUrl = baseUrl,
-                model = "test",
-                messages = listOf(ChatMessage("user", "hi")),
-                maxTokens = 100,
-                onToken = { tokens.add(it) },
-                onComplete = {},
-                onError = { fail("Should not error") },
-            )
+            val events =
+                client
+                    .streamChat(
+                        baseUrl = baseUrl,
+                        model = "test",
+                        messages = listOf(ChatMessage("user", "hi")),
+                        maxTokens = 100,
+                    ).toList()
 
+            val tokens = events.filterIsInstance<StreamEvent.Token>()
             assertTrue(tokens.isEmpty(), "No tokens from empty choices")
+            assertTrue(events.last() is StreamEvent.Complete)
         }
 
     @Test
@@ -271,22 +264,21 @@ class ChatClientTest {
                     .setBody(sseBody),
             )
 
-            val tokens = mutableListOf<String>()
-            client.streamChat(
-                baseUrl = baseUrl,
-                model = "test",
-                messages = listOf(ChatMessage("user", "hi")),
-                maxTokens = 100,
-                onToken = { tokens.add(it) },
-                onComplete = {},
-                onError = { fail("Should not error") },
-            )
+            val events =
+                client
+                    .streamChat(
+                        baseUrl = baseUrl,
+                        model = "test",
+                        messages = listOf(ChatMessage("user", "hi")),
+                        maxTokens = 100,
+                    ).toList()
 
+            val tokens = events.filterIsInstance<StreamEvent.Token>()
             assertTrue(tokens.isEmpty(), "No tokens from null content")
         }
 
     @Test
-    fun `streamChat errors on unexpected EOF without DONE`() =
+    fun `streamChat emits Error on unexpected EOF without DONE`() =
         runTest {
             val sseBody =
                 """
@@ -301,28 +293,24 @@ class ChatClientTest {
                     .setBody(sseBody),
             )
 
-            val tokens = mutableListOf<String>()
-            var error: Exception? = null
-            client.streamChat(
-                baseUrl = baseUrl,
-                model = "test",
-                messages = listOf(ChatMessage("user", "hi")),
-                maxTokens = 100,
-                onToken = { tokens.add(it) },
-                onComplete = { fail("Should not complete without [DONE]") },
-                onError = { error = it },
-            )
+            val events =
+                client
+                    .streamChat(
+                        baseUrl = baseUrl,
+                        model = "test",
+                        messages = listOf(ChatMessage("user", "hi")),
+                        maxTokens = 100,
+                    ).toList()
 
+            val tokens = events.filterIsInstance<StreamEvent.Token>().map { it.content }
             assertEquals(listOf("partial"), tokens, "Should still deliver tokens before EOF")
-            assertNotNull(error, "Should error on EOF without [DONE]")
-            assertTrue(error!!.message!!.contains("unexpectedly"))
+            val error = events.last() as StreamEvent.Error
+            assertTrue(error.exception.message!!.contains("unexpectedly"))
         }
 
     @Test
-    fun `streamChat coroutine cancellation stops stream`() =
+    fun `streamChat cancellation stops flow collection`() =
         runTest {
-            // Use a throttled response so tokens are delivered slowly.
-            // This proves cancellation actually stops the stream mid-flight.
             val sseBody =
                 """
                 data: {"id":"1","object":"chat.completion.chunk","choices":[{"delta":{"content":"tok1"},"index":0}]}
@@ -343,25 +331,22 @@ class ChatClientTest {
                     .throttleBody(40, 200, TimeUnit.MILLISECONDS),
             )
 
-            val tokens = mutableListOf<String>()
-            var completeCalled = false
+            val collected = mutableListOf<StreamEvent>()
             val job =
                 launch {
-                    client.streamChat(
-                        baseUrl = baseUrl,
-                        model = "test",
-                        messages = listOf(ChatMessage("user", "hi")),
-                        maxTokens = 100,
-                        onToken = {
-                            tokens.add(it)
+                    client
+                        .streamChat(
+                            baseUrl = baseUrl,
+                            model = "test",
+                            messages = listOf(ChatMessage("user", "hi")),
+                            maxTokens = 100,
+                        ).collect { event ->
+                            collected.add(event)
                             // Cancel after first token
-                            if (tokens.size == 1) {
+                            if (event is StreamEvent.Token && collected.size == 1) {
                                 this.coroutineContext[kotlinx.coroutines.Job]?.cancel()
                             }
-                        },
-                        onComplete = { completeCalled = true },
-                        onError = {},
-                    )
+                        }
                 }
 
             try {
@@ -370,10 +355,10 @@ class ChatClientTest {
                 // Expected
             }
 
-            // Should have received first token but stream should stop before DONE
-            assertTrue(tokens.isNotEmpty(), "Should have received at least one token")
-            assertFalse(completeCalled, "onComplete should NOT fire — stream was cancelled")
-            assertTrue(tokens.size < 3, "Should not receive all tokens after cancellation, got: $tokens")
+            assertTrue(collected.isNotEmpty(), "Should have received at least one token")
+            val completions = collected.filterIsInstance<StreamEvent.Complete>()
+            assertTrue(completions.isEmpty(), "Complete should NOT fire — stream was cancelled")
+            assertTrue(collected.size < 3, "Should not receive all tokens after cancellation, got: $collected")
         }
 
     @Test
@@ -386,19 +371,17 @@ class ChatClientTest {
                     .setBody("data: [DONE]\n\n"),
             )
 
-            client.streamChat(
-                baseUrl = baseUrl,
-                model = "gpt-4",
-                messages =
-                    listOf(
-                        ChatMessage("system", "You are helpful"),
-                        ChatMessage("user", "hello"),
-                    ),
-                maxTokens = 2048,
-                onToken = {},
-                onComplete = {},
-                onError = {},
-            )
+            client
+                .streamChat(
+                    baseUrl = baseUrl,
+                    model = "gpt-4",
+                    messages =
+                        listOf(
+                            ChatMessage("system", "You are helpful"),
+                            ChatMessage("user", "hello"),
+                        ),
+                    maxTokens = 2048,
+                ).toList()
 
             val request = server.takeRequest()
             assertEquals("POST", request.method)
@@ -437,17 +420,16 @@ class ChatClientTest {
                     .setBody(sseBody),
             )
 
-            val tokens = mutableListOf<String>()
-            client.streamChat(
-                baseUrl = baseUrl,
-                model = "test",
-                messages = listOf(ChatMessage("user", "hi")),
-                maxTokens = 100,
-                onToken = { tokens.add(it) },
-                onComplete = {},
-                onError = { fail("Should not error") },
-            )
+            val events =
+                client
+                    .streamChat(
+                        baseUrl = baseUrl,
+                        model = "test",
+                        messages = listOf(ChatMessage("user", "hi")),
+                        maxTokens = 100,
+                    ).toList()
 
+            val tokens = events.filterIsInstance<StreamEvent.Token>().map { it.content }
             assertEquals(listOf("content"), tokens, "Should only process data lines")
         }
 
@@ -456,7 +438,6 @@ class ChatClientTest {
     @Test
     fun `streamChat aborts when response exceeds MAX_STREAM_BYTES`() =
         runTest {
-            // Each chunk has ~100KB of content; 25 chunks ≈ 2.5MB which exceeds the 2MB limit
             val bigContent = "X".repeat(100_000)
             val chunkLine =
                 """data: {"id":"1","object":"chat.completion.chunk","choices":[{"delta":{"content":"$bigContent"},"index":0}]}"""
@@ -477,22 +458,21 @@ class ChatClientTest {
                     .setBody(sseBody),
             )
 
-            val tokens = mutableListOf<String>()
-            var error: Exception? = null
-            var completed = false
-            client.streamChat(
-                baseUrl = baseUrl,
-                model = "test",
-                messages = listOf(ChatMessage("user", "hi")),
-                maxTokens = 100,
-                onToken = { tokens.add(it) },
-                onComplete = { completed = true },
-                onError = { error = it },
-            )
+            val events =
+                client
+                    .streamChat(
+                        baseUrl = baseUrl,
+                        model = "test",
+                        messages = listOf(ChatMessage("user", "hi")),
+                        maxTokens = 100,
+                    ).toList()
 
-            assertNotNull(error, "Should have received an error")
-            assertTrue(error!!.message!!.contains("too large"), "Error should mention 'too large'")
-            assertTrue(!completed, "onComplete should not fire after abort")
+            val error = events.filterIsInstance<StreamEvent.Error>().singleOrNull()
+            assertNotNull(error, "Should have received an error event")
+            assertTrue(error!!.exception.message!!.contains("too large"), "Error should mention 'too large'")
+            val completions = events.filterIsInstance<StreamEvent.Complete>()
+            assertTrue(completions.isEmpty(), "Complete should not fire after abort")
+            val tokens = events.filterIsInstance<StreamEvent.Token>()
             assertTrue(tokens.isNotEmpty(), "Should have delivered tokens before hitting the limit")
         }
 
@@ -517,7 +497,6 @@ class ChatClientTest {
                         throw CancellationException("re-propagate")
                     }
                 }
-            // Let coroutine enter fetchModels before cancelling
             delay(50)
             job.cancel()
             job.join()
@@ -536,15 +515,13 @@ class ChatClientTest {
                     .setBody("data: [DONE]\n\n"),
             )
 
-            client.streamChat(
-                baseUrl = baseUrl,
-                model = "test",
-                messages = listOf(ChatMessage("user", "hi")),
-                maxTokens = 100,
-                onToken = {},
-                onComplete = {},
-                onError = {},
-            )
+            client
+                .streamChat(
+                    baseUrl = baseUrl,
+                    model = "test",
+                    messages = listOf(ChatMessage("user", "hi")),
+                    maxTokens = 100,
+                ).toList()
 
             val request = server.takeRequest()
             val body = request.body.readUtf8()
@@ -555,7 +532,7 @@ class ChatClientTest {
         }
 
     @Test
-    fun `streamChat invokes onError and stops on non-2xx without leaking`() =
+    fun `streamChat emits Error on auth failure without tokens`() =
         runTest {
             server.enqueue(
                 MockResponse()
@@ -563,33 +540,24 @@ class ChatClientTest {
                     .setBody("Unauthorized: invalid API key"),
             )
 
-            val tokens = mutableListOf<String>()
-            var error: Exception? = null
-            var completed = false
-            client.streamChat(
-                baseUrl = baseUrl,
-                model = "test",
-                messages = listOf(ChatMessage("user", "hi")),
-                maxTokens = 100,
-                onToken = { tokens.add(it) },
-                onComplete = { completed = true },
-                onError = { error = it },
-            )
+            val events =
+                client
+                    .streamChat(
+                        baseUrl = baseUrl,
+                        model = "test",
+                        messages = listOf(ChatMessage("user", "hi")),
+                        maxTokens = 100,
+                    ).toList()
 
-            assertNotNull(error, "onError should have been called")
-            assertTrue(error!!.message!!.contains("401"), "Error should contain status code 401")
-            assertTrue(
-                error!!.message!!.contains("Unauthorized"),
-                "Error should contain the response body",
-            )
-            assertTrue(tokens.isEmpty(), "No tokens should be delivered on auth failure")
-            assertTrue(!completed, "onComplete should not fire on error")
+            assertEquals(1, events.size)
+            val error = events[0] as StreamEvent.Error
+            assertTrue(error.exception.message!!.contains("401"), "Error should contain status code 401")
+            assertTrue(error.exception.message!!.contains("Unauthorized"), "Error should contain the response body")
         }
 
     @Test
     fun `streamChat handles very large error body gracefully`() =
         runTest {
-            // Build a 10KB error body; the production code calls .take(1000)
             val largeErrorBody = "E".repeat(10_000)
 
             server.enqueue(
@@ -598,21 +566,19 @@ class ChatClientTest {
                     .setBody(largeErrorBody),
             )
 
-            var error: Exception? = null
-            client.streamChat(
-                baseUrl = baseUrl,
-                model = "test",
-                messages = listOf(ChatMessage("user", "hi")),
-                maxTokens = 100,
-                onToken = { fail("Should not receive tokens") },
-                onComplete = { fail("Should not complete") },
-                onError = { error = it },
-            )
+            val events =
+                client
+                    .streamChat(
+                        baseUrl = baseUrl,
+                        model = "test",
+                        messages = listOf(ChatMessage("user", "hi")),
+                        maxTokens = 100,
+                    ).toList()
 
-            assertNotNull(error, "onError should have been called")
-            assertTrue(error!!.message!!.contains("500"), "Error should contain status code")
-            // The production code truncates the body with .take(1000), so the full 10KB should not appear
-            val errorMsg = error!!.message!!
+            assertEquals(1, events.size)
+            val error = events[0] as StreamEvent.Error
+            assertTrue(error.exception.message!!.contains("500"), "Error should contain status code")
+            val errorMsg = error.exception.message!!
             val bodyInMsg = errorMsg.substringAfter(": ")
             assertTrue(bodyInMsg.length <= 1000, "Error body should be truncated to at most 1000 chars, got ${bodyInMsg.length}")
             assertTrue(bodyInMsg.startsWith("EEEE"), "Error should contain the start of the error body")

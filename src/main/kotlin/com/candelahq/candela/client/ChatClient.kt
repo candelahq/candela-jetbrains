@@ -5,7 +5,11 @@ import com.google.gson.JsonObject
 import com.intellij.openapi.diagnostic.Logger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.future.await
 import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
@@ -16,7 +20,6 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
-import kotlin.coroutines.coroutineContext
 
 /**
  * Streaming chat client for the Candela LM Studio-compatible API (port 1234).
@@ -77,142 +80,135 @@ class ChatClient {
         }
 
     /**
-     * Stream a chat completion via SSE.
+     * Stream a chat completion via SSE, returning a [Flow] of [StreamEvent]s.
      *
      * Sends POST /v1/chat/completions with stream=true and reads the response
-     * line-by-line, parsing SSE `data:` events.
+     * line-by-line, parsing SSE `data:` events. Each content delta is emitted
+     * as a [StreamEvent.Token], and the stream terminates with either
+     * [StreamEvent.Complete] or [StreamEvent.Error].
      *
-     * Cancellation is handled via the coroutine's [Job] — when the caller cancels
-     * the coroutine, [ensureActive] throws [CancellationException] and the stream
-     * is aborted cleanly.
+     * Cancellation is handled naturally — cancelling the collecting coroutine
+     * closes the HTTP input stream and stops emission.
      *
      * @param baseUrl   Chat server base URL (e.g. "http://127.0.0.1:1234")
      * @param model     Model ID to use
      * @param messages  Conversation messages (including system prompt)
      * @param maxTokens Maximum tokens to generate
-     * @param onToken   Called for each content delta (on IO dispatcher)
-     * @param onComplete Called when stream finishes, with optional usage info
-     * @param onError   Called on any exception (not called on cancellation)
+     * @return a cold [Flow] that begins streaming when collected
      */
-    suspend fun streamChat(
+    fun streamChat(
         baseUrl: String,
         model: String,
         messages: List<ChatMessage>,
         maxTokens: Int,
-        onToken: (String) -> Unit,
-        onComplete: (ChunkUsage?) -> Unit,
-        onError: (Exception) -> Unit,
-    ) = withContext(Dispatchers.IO) {
-        try {
-            log.info("Starting chat stream: model=$model, maxTokens=$maxTokens")
-            val body = buildRequestBody(model, messages, maxTokens)
+    ): Flow<StreamEvent> =
+        flow {
+            try {
+                log.info("Starting chat stream: model=$model, maxTokens=$maxTokens")
+                val body = buildRequestBody(model, messages, maxTokens)
 
-            val request =
-                HttpRequest
-                    .newBuilder()
-                    .uri(URI.create("${baseUrl.trimEnd('/')}/v1/chat/completions"))
-                    .header("Content-Type", "application/json")
-                    .header("Accept", "text/event-stream")
-                    .timeout(Duration.ofSeconds(300)) // Long timeout for streaming
-                    .POST(HttpRequest.BodyPublishers.ofString(body))
-                    .build()
+                val request =
+                    HttpRequest
+                        .newBuilder()
+                        .uri(URI.create("${baseUrl.trimEnd('/')}/v1/chat/completions"))
+                        .header("Content-Type", "application/json")
+                        .header("Accept", "text/event-stream")
+                        .timeout(Duration.ofSeconds(300))
+                        .POST(HttpRequest.BodyPublishers.ofString(body))
+                        .build()
 
-            ensureActive()
-            val response = client.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream()).await()
+                currentCoroutineContext().ensureActive()
+                val response = client.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream()).await()
 
-            if (response.statusCode() !in 200..299) {
-                val errorBody = response.body().use { it.bufferedReader().readText().take(1000) }
-                onError(RuntimeException("Chat API returned ${response.statusCode()}: $errorBody"))
-                return@withContext
-            }
-
-            var lastUsage: ChunkUsage? = null
-            var doneReceived = false
-            var totalBytes = 0L
-
-            // Close the InputStream on cancellation to unblock readLine()
-            val inputStream = response.body()
-            coroutineContext.job.invokeOnCompletion { inputStream.close() }
-
-            BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8)).use { reader ->
-                var line = reader.readLine()
-                @Suppress("LoopWithTooManyJumpStatements") // SSE protocol parsing
-                while (line != null) {
-                    // Check for coroutine cancellation instead of AtomicBoolean
-                    coroutineContext.ensureActive()
-
-                    // Skip empty lines (SSE event delimiters)
-                    if (line.isBlank()) {
-                        line = reader.readLine()
-                        continue
-                    }
-
-                    // Only process data lines
-                    if (!line.startsWith("data: ") && !line.startsWith("data:")) {
-                        line = reader.readLine()
-                        continue
-                    }
-
-                    val data = line.removePrefix("data: ").removePrefix("data:").trim()
-                    log.debug("SSE data: ${data.take(200)}")
-
-                    // Stream terminator
-                    if (data == "[DONE]") {
-                        doneReceived = true
-                        break
-                    }
-
-                    try {
-                        val chunk = gson.fromJson(data, ChatCompletionChunk::class.java)
-                        if (chunk != null) {
-                            // Capture usage if present (usually in the final chunk)
-                            if (chunk.usage != null) {
-                                lastUsage = chunk.usage
-                            }
-
-                            // Extract content delta — null-safe for all the quirks
-                            val choice = chunk.choices?.firstOrNull()
-                            val content = choice?.delta?.content ?: ""
-
-                            if (content.isNotEmpty()) {
-                                totalBytes += content.length
-                                if (totalBytes > MAX_STREAM_BYTES) {
-                                    log.warn("Stream exceeded ${MAX_STREAM_BYTES / 1024}KB limit, aborting")
-                                    onError(RuntimeException("Response too large (>${MAX_STREAM_BYTES / 1024}KB) — aborting"))
-                                    return@withContext
-                                }
-                                onToken(content)
-                            }
-                        }
-                    } catch (
-                        @Suppress("TooGenericExceptionCaught")
-                        e: Exception,
-                    ) {
-                        log.warn("Malformed SSE chunk: ${data.take(200)}", e)
-                    }
-
-                    line = reader.readLine()
+                if (response.statusCode() !in 200..299) {
+                    val errorBody = response.body().use { it.bufferedReader().readText().take(1000) }
+                    emit(StreamEvent.Error(RuntimeException("Chat API returned ${response.statusCode()}: $errorBody")))
+                    return@flow
                 }
-            }
 
-            // Signal completion or premature EOF (not called on cancellation)
-            if (doneReceived) {
-                log.info("Chat stream complete: ${lastUsage?.totalTokens ?: "?"} tokens")
-                onComplete(lastUsage)
-            } else {
-                log.warn("Chat stream ended without [DONE] marker")
-                onError(RuntimeException("Stream ended unexpectedly — response may be incomplete"))
+                var lastUsage: ChunkUsage? = null
+                var doneReceived = false
+                var totalBytes = 0L
+
+                // Close the InputStream on cancellation to unblock readLine()
+                val inputStream = response.body()
+                currentCoroutineContext().job.invokeOnCompletion { inputStream.close() }
+
+                BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8)).use { reader ->
+                    var line = reader.readLine()
+                    @Suppress("LoopWithTooManyJumpStatements")
+                    while (line != null) {
+                        currentCoroutineContext().ensureActive()
+
+                        if (line.isBlank()) {
+                            line = reader.readLine()
+                            continue
+                        }
+
+                        if (!line.startsWith("data: ") && !line.startsWith("data:")) {
+                            line = reader.readLine()
+                            continue
+                        }
+
+                        val data = line.removePrefix("data: ").removePrefix("data:").trim()
+                        log.debug("SSE data: ${data.take(200)}")
+
+                        if (data == "[DONE]") {
+                            doneReceived = true
+                            break
+                        }
+
+                        try {
+                            val chunk = gson.fromJson(data, ChatCompletionChunk::class.java)
+                            if (chunk != null) {
+                                if (chunk.usage != null) {
+                                    lastUsage = chunk.usage
+                                }
+
+                                val choice = chunk.choices?.firstOrNull()
+                                val content = choice?.delta?.content ?: ""
+
+                                if (content.isNotEmpty()) {
+                                    totalBytes += content.length
+                                    if (totalBytes > MAX_STREAM_BYTES) {
+                                        log.warn("Stream exceeded ${MAX_STREAM_BYTES / 1024}KB limit, aborting")
+                                        emit(
+                                            StreamEvent.Error(
+                                                RuntimeException("Response too large (>${MAX_STREAM_BYTES / 1024}KB) — aborting"),
+                                            ),
+                                        )
+                                        return@flow
+                                    }
+                                    emit(StreamEvent.Token(content))
+                                }
+                            }
+                        } catch (
+                            @Suppress("TooGenericExceptionCaught")
+                            e: Exception,
+                        ) {
+                            log.warn("Malformed SSE chunk: ${data.take(200)}", e)
+                        }
+
+                        line = reader.readLine()
+                    }
+                }
+
+                if (doneReceived) {
+                    log.info("Chat stream complete: ${lastUsage?.totalTokens ?: "?"} tokens")
+                    emit(StreamEvent.Complete(lastUsage))
+                } else {
+                    log.warn("Chat stream ended without [DONE] marker")
+                    emit(StreamEvent.Error(RuntimeException("Stream ended unexpectedly — response may be incomplete")))
+                }
+            } catch (
+                @Suppress("TooGenericExceptionCaught")
+                e: Exception,
+            ) {
+                if (e is CancellationException) throw e
+                log.error("Chat stream failed", e)
+                emit(StreamEvent.Error(e))
             }
-        } catch (
-            @Suppress("TooGenericExceptionCaught")
-            e: Exception,
-        ) {
-            // CancellationException propagates naturally — don't call onError
-            if (e is kotlinx.coroutines.CancellationException) throw e
-            log.error("Chat stream failed", e)
-            onError(e)
-        }
-    }
+        }.flowOn(Dispatchers.IO)
 
     private fun buildRequestBody(
         model: String,
