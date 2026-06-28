@@ -11,8 +11,21 @@ import java.util.concurrent.CopyOnWriteArrayList
  * Thread-safe: [_messages] uses [CopyOnWriteArrayList] for safe concurrent
  * access between EDT and background coroutines. Streaming state is managed
  * via [streamingJob] — cancellation is handled by cancelling the coroutine Job.
+ *
+ * @param onMessageAdded optional callback fired after each message is added,
+ *        used by [ChatHistoryService] to persist to SQLite.
  */
-class ChatSession {
+class ChatSession(
+    private val onMessageAdded: (
+        (
+            role: String,
+            content: String,
+            model: String?,
+            tokenCount: Int?,
+            costUsd: Double?,
+        ) -> Unit
+    )? = null,
+) {
     private val _messages = CopyOnWriteArrayList<ChatMessage>()
 
     /** Immutable snapshot of the conversation history (excludes system prompt). */
@@ -30,10 +43,17 @@ class ChatSession {
 
     fun addUserMessage(content: String) {
         _messages.add(ChatMessage("user", content))
+        onMessageAdded?.invoke("user", content, null, null, null)
     }
 
-    fun addAssistantMessage(content: String) {
+    fun addAssistantMessage(
+        content: String,
+        model: String? = null,
+        tokenCount: Int? = null,
+        costUsd: Double? = null,
+    ) {
         _messages.add(ChatMessage("assistant", content))
+        onMessageAdded?.invoke("assistant", content, model, tokenCount, costUsd)
     }
 
     /** Cancel the current streaming response (if any). */
@@ -45,6 +65,15 @@ class ChatSession {
     fun clear() {
         cancelStreaming()
         _messages.clear()
+    }
+
+    /**
+     * Restore messages from persistence (e.g., SQLite) without triggering callbacks.
+     * Used on startup to rebuild from saved state.
+     */
+    fun restoreMessages(messages: List<ChatMessage>) {
+        _messages.clear()
+        _messages.addAll(messages)
     }
 
     /**

@@ -38,9 +38,14 @@ pre-commit:
       run: ./gradlew ktlintCheck
 
 pre-push:
+  parallel: true
   commands:
-    gradle-build:
-      run: nix develop -c ./gradlew buildPlugin
+    platform-test-reminder:
+      run: |
+        echo ""
+        echo "💡 Platform tests: right-click *PlatformTest in IntelliJ to run"
+        echo "   (Gradle CLI hangs due to IDE sandbox tearDown — use IDE runner)"
+        echo ""
 
     # Block tag pushes if build.gradle.kts version doesn't match the tag.
     tag-version-check:

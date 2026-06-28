@@ -26,6 +26,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Cursor
@@ -64,7 +65,13 @@ class ChatPanel(
 ) : JPanel(BorderLayout()),
     Disposable {
     private val chatClient = ChatClient()
-    private val session = ChatSession()
+    private val historyService = ChatHistoryService.getInstance(project)
+    private val session =
+        ChatSession { role, content, model, tokenCount, costUsd ->
+            historyService.ioScope.launch {
+                historyService.saveMessage(role, content, model, tokenCount, costUsd)
+            }
+        }
 
     /**
      * Coroutine scope — child of the project-level scope, cancelled in [dispose].
@@ -133,7 +140,50 @@ class ChatPanel(
 
     init {
         buildUI()
+        restoreActiveSession()
         loadModels()
+    }
+
+    /**
+     * Restore the last active session from SQLite, or create a new one.
+     * Rebuilds the UI with persisted messages.
+     */
+    private fun restoreActiveSession() {
+        scope.launch {
+            val sessionId: String
+            val messages: List<MessageRow>
+            withContext(Dispatchers.IO) {
+                sessionId = historyService.ensureActiveSession()
+                messages = historyService.getMessages(sessionId)
+            }
+            if (messages.isNotEmpty()) {
+                session.restoreMessages(
+                    messages.map {
+                        com.candelahq.candela.client
+                            .ChatMessage(it.role, it.content)
+                    },
+                )
+                SwingUtilities.invokeLater { rebuildChatUI() }
+            }
+        }
+    }
+
+    /**
+     * Rebuild chat bubbles from session.messages (used after restore or session switch).
+     */
+    private fun rebuildChatUI() {
+        messagesPanel.removeAll()
+        for (msg in session.messages) {
+            when (msg.role) {
+                "user" -> addUserBubble(msg.content)
+                "assistant" -> {
+                    addAssistantBubble(msg.content)
+                    addCodeBlockActions(msg.content)
+                }
+            }
+        }
+        messagesPanel.revalidate()
+        messagesPanel.repaint()
     }
 
     // ── Public API (used by editor actions) ──────────────────────────────
@@ -372,6 +422,12 @@ class ChatPanel(
         messagesPanel.repaint()
         sendButton.text = "Send"
         streamingTextPane = null
+        // Create a new persisted session off EDT
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                historyService.newSession()
+            }
+        }
         addInfoMessage("Conversation cleared. Start a new chat.")
     }
 

@@ -5,9 +5,14 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Tests for the [buildCodeFence] utility function.
+ * Unit tests for action utilities and update() logic.
+ *
+ * Action update() tests that need AnActionEvent are in [ActionUpdatePlatformTest]
+ * since they require IntelliJ Platform initialization.
  */
 class ActionsTest {
+    // ── buildCodeFence ──────────────────────────────────────────────
+
     @Test
     fun `basic code fence with language`() {
         val result = buildCodeFence("val x = 1", "kotlin")
@@ -24,7 +29,6 @@ class ActionsTest {
     fun `code containing triple backticks uses longer fence`() {
         val code = "Here is a code block:\n```\ninner code\n```"
         val result = buildCodeFence(code, "markdown")
-        // Should use 4+ backticks to avoid breaking
         assertTrue(result.startsWith("````"), "Should use at least 4 backticks, got: $result")
         assertTrue(result.contains(code), "Original code should be preserved")
     }
