@@ -1,3 +1,5 @@
+import org.jetbrains.intellij.platform.gradle.TestFrameworkType
+
 plugins {
     id("java")
     id("org.jetbrains.kotlin.jvm") version "2.1.20"
@@ -20,9 +22,11 @@ dependencies {
     intellijPlatform {
         intellijIdeaCommunity("2025.1")
         pluginVerifier()
+        testFramework(TestFrameworkType.Platform)
     }
 
     implementation("com.google.code.gson:gson:2.13.1")
+    implementation("org.xerial:sqlite-jdbc:3.46.1.0")
     // Coroutines are bundled by IntelliJ 2025.1+ — compileOnly avoids classloader clashes
     compileOnly("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
     compileOnly("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.10.2")
@@ -30,6 +34,7 @@ dependencies {
     testImplementation(kotlin("test"))
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
     testImplementation("junit:junit:4.13.2") // Required by IntelliJ platform test framework
+    testRuntimeOnly("org.junit.vintage:junit-vintage-engine:5.11.4")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }
 

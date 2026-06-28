@@ -64,7 +64,11 @@ class ChatPanel(
 ) : JPanel(BorderLayout()),
     Disposable {
     private val chatClient = ChatClient()
-    private val session = ChatSession()
+    private val historyService = ChatHistoryService.getInstance(project)
+    private val session =
+        ChatSession { role, content ->
+            historyService.saveMessage(role, content)
+        }
 
     /**
      * Coroutine scope — child of the project-level scope, cancelled in [dispose].
@@ -133,7 +137,44 @@ class ChatPanel(
 
     init {
         buildUI()
+        restoreActiveSession()
         loadModels()
+    }
+
+    /**
+     * Restore the last active session from SQLite, or create a new one.
+     * Rebuilds the UI with persisted messages.
+     */
+    private fun restoreActiveSession() {
+        val sessionId = historyService.ensureActiveSession()
+        val messages = historyService.getMessages(sessionId)
+        if (messages.isNotEmpty()) {
+            session.restoreMessages(
+                messages.map {
+                    com.candelahq.candela.client
+                        .ChatMessage(it.role, it.content)
+                },
+            )
+            rebuildChatUI()
+        }
+    }
+
+    /**
+     * Rebuild chat bubbles from session.messages (used after restore or session switch).
+     */
+    private fun rebuildChatUI() {
+        messagesPanel.removeAll()
+        for (msg in session.messages) {
+            when (msg.role) {
+                "user" -> addUserBubble(msg.content)
+                "assistant" -> {
+                    addAssistantBubble(msg.content)
+                    addCodeBlockActions(msg.content)
+                }
+            }
+        }
+        messagesPanel.revalidate()
+        messagesPanel.repaint()
     }
 
     // ── Public API (used by editor actions) ──────────────────────────────
@@ -372,6 +413,8 @@ class ChatPanel(
         messagesPanel.repaint()
         sendButton.text = "Send"
         streamingTextPane = null
+        // Create a new persisted session
+        historyService.newSession()
         addInfoMessage("Conversation cleared. Start a new chat.")
     }
 
