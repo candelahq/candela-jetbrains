@@ -2,6 +2,11 @@ package com.candelahq.candela.client
 
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.future.await
+import kotlinx.coroutines.withContext
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -14,6 +19,8 @@ import java.time.Instant
  *
  * Mirrors the TypeScript CandelaClient from candela-vscode.
  * Uses the consolidated GetDashboardData RPC with fallback to legacy RPCs.
+ *
+ * All public methods are suspend functions that run blocking I/O on [Dispatchers.IO].
  */
 class CandelaClient(
     baseUrl: String = "http://localhost:8181",
@@ -40,23 +47,30 @@ class CandelaClient(
 
     // ── Health ────────────────────────────────────────────────────────────
 
-    fun isAlive(): Boolean {
-        alive?.let { if (it) return true }
-        return try {
-            val req =
-                HttpRequest
-                    .newBuilder()
-                    .uri(URI.create("$baseUrl/healthz"))
-                    .timeout(Duration.ofSeconds(2))
-                    .GET()
-                    .build()
-            val res = http.send(req, HttpResponse.BodyHandlers.ofString())
-            (res.statusCode() in 200..299).also { alive = it }
-        } catch (_: Exception) {
-            alive = false
-            false
+    suspend fun isAlive(): Boolean =
+        withContext(Dispatchers.IO) {
+            alive?.let { if (it) return@withContext true }
+            try {
+                ensureActive()
+                val req =
+                    HttpRequest
+                        .newBuilder()
+                        .uri(URI.create("$baseUrl/healthz"))
+                        .timeout(Duration.ofSeconds(2))
+                        .GET()
+                        .build()
+                val res = http.send(req, HttpResponse.BodyHandlers.ofString())
+                (res.statusCode() in 200..299).also { alive = it }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (
+                @Suppress("TooGenericExceptionCaught")
+                _: Exception,
+            ) {
+                alive = false
+                false
+            }
         }
-    }
 
     fun resetHealth() {
         alive = null
@@ -68,7 +82,7 @@ class CandelaClient(
 
     // ── Public API ────────────────────────────────────────────────────────
 
-    fun getDashboardData(hours: Int = 24): DashboardData? {
+    suspend fun getDashboardData(hours: Int = 24): DashboardData? {
         if (!isAlive()) return null
 
         cache?.let { c ->
@@ -84,62 +98,80 @@ class CandelaClient(
 
     // ── Private: consolidated RPC ─────────────────────────────────────────
 
-    private fun tryGetDashboardData(hours: Int): DashboardData? {
-        return try {
-            val body =
-                buildTimeRangeBody(hours).apply {
-                    addProperty("include_budget", true)
-                }
-            val res = postRpc("candela.v1.DashboardService/GetDashboardData", body)
-            if (res.statusCode() == 404 || res.statusCode() == 501) return null
-            if (res.statusCode() !in 200..299) return null
+    private suspend fun tryGetDashboardData(hours: Int): DashboardData? =
+        withContext(Dispatchers.IO) {
+            try {
+                ensureActive()
+                val body =
+                    buildTimeRangeBody(hours).apply {
+                        addProperty("include_budget", true)
+                    }
+                val res = postRpc("candela.v1.DashboardService/GetDashboardData", body)
+                if (res.statusCode() == 404 || res.statusCode() == 501) return@withContext null
+                if (res.statusCode() !in 200..299) return@withContext null
 
-            val json = gson.fromJson(res.body(), JsonObject::class.java)
-            parseDashboardResponse(json)
-        } catch (_: Exception) {
-            null
+                val json = gson.fromJson(res.body(), JsonObject::class.java)
+                parseDashboardResponse(json)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (
+                @Suppress("TooGenericExceptionCaught")
+                _: Exception,
+            ) {
+                null
+            }
         }
-    }
 
-    private fun legacyFanout(hours: Int): DashboardData? =
-        try {
-            val timeRange = buildTimeRangeBody(hours)
+    private suspend fun legacyFanout(hours: Int): DashboardData? =
+        withContext(Dispatchers.IO) {
+            try {
+                val timeRange = buildTimeRangeBody(hours)
 
-            // Fan out two requests
-            val summaryFuture =
-                http.sendAsync(
-                    buildRpcRequest("candela.v1.DashboardService/GetUsageSummary", timeRange),
-                    HttpResponse.BodyHandlers.ofString(),
-                )
-            val budgetFuture =
-                http.sendAsync(
-                    buildRpcRequest("candela.v1.UserService/GetMyBudget", JsonObject()),
-                    HttpResponse.BodyHandlers.ofString(),
-                )
+                // Fan out two non-blocking requests concurrently via sendAsync().await()
+                val summaryFuture =
+                    http.sendAsync(
+                        buildRpcRequest("candela.v1.DashboardService/GetUsageSummary", timeRange),
+                        HttpResponse.BodyHandlers.ofString(),
+                    )
+                val budgetFuture =
+                    http.sendAsync(
+                        buildRpcRequest("candela.v1.UserService/GetMyBudget", JsonObject()),
+                        HttpResponse.BodyHandlers.ofString(),
+                    )
 
-            var usage = UsageSummary()
-            val summaryRes = summaryFuture.join()
-            if (summaryRes.statusCode() in 200..299) {
-                val s = gson.fromJson(summaryRes.body(), JsonObject::class.java)
-                usage = parseUsageSummary(s)
+                var usage = UsageSummary()
+                var hasLegacyData = false
+                val summaryRes = summaryFuture.await()
+                if (summaryRes.statusCode() in 200..299) {
+                    hasLegacyData = true
+                    val s = gson.fromJson(summaryRes.body(), JsonObject::class.java)
+                    usage = parseUsageSummary(s)
+                }
+
+                var budget: BudgetInfo? = null
+                var activeGrants: List<GrantInfo> = emptyList()
+                var totalRemainingUsd: Double? = null
+
+                val budgetRes = budgetFuture.await()
+                if (budgetRes.statusCode() in 200..299) {
+                    hasLegacyData = true
+                    val b = gson.fromJson(budgetRes.body(), JsonObject::class.java)
+                    budget = parseBudget(b.getAsJsonObject("budget"))
+                    activeGrants = parseGrants(b.getAsJsonArray("activeGrants") ?: b.getAsJsonArray("active_grants"))
+                    val raw = (b.get("totalRemainingUsd") ?: b.get("total_remaining_usd"))?.asDouble
+                    if (raw != null && raw >= 0) totalRemainingUsd = raw
+                }
+
+                if (!hasLegacyData) return@withContext null
+                DashboardData(usage, emptyList(), budget, activeGrants, totalRemainingUsd)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (
+                @Suppress("TooGenericExceptionCaught")
+                _: Exception,
+            ) {
+                null
             }
-
-            var budget: BudgetInfo? = null
-            var activeGrants: List<GrantInfo> = emptyList()
-            var totalRemainingUsd: Double? = null
-
-            val budgetRes = budgetFuture.join()
-            if (budgetRes.statusCode() in 200..299) {
-                val b = gson.fromJson(budgetRes.body(), JsonObject::class.java)
-                budget = parseBudget(b.getAsJsonObject("budget"))
-                activeGrants = parseGrants(b.getAsJsonArray("activeGrants") ?: b.getAsJsonArray("active_grants"))
-                val raw = (b.get("totalRemainingUsd") ?: b.get("total_remaining_usd"))?.asDouble
-                if (raw != null && raw >= 0) totalRemainingUsd = raw
-            }
-
-            DashboardData(usage, emptyList(), budget, activeGrants, totalRemainingUsd)
-        } catch (_: Exception) {
-            null
         }
 
     // ── Parsing ───────────────────────────────────────────────────────────
@@ -203,7 +235,10 @@ class CandelaClient(
             periodEndRaw.takeIf { it.isNotEmpty() }?.let {
                 try {
                     Instant.parse(it)
-                } catch (_: Exception) {
+                } catch (
+                    @Suppress("TooGenericExceptionCaught")
+                    _: Exception,
+                ) {
                     null
                 }
             }
@@ -230,7 +265,10 @@ class CandelaClient(
                 expiresRaw.takeIf { it.isNotEmpty() }?.let {
                     try {
                         Instant.parse(it)
-                    } catch (_: Exception) {
+                    } catch (
+                        @Suppress("TooGenericExceptionCaught")
+                        _: Exception,
+                    ) {
                         null
                     }
                 }

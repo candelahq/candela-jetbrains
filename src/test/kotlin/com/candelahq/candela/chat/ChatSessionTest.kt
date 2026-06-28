@@ -1,12 +1,16 @@
 package com.candelahq.candela.chat
 
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * Tests for [ChatSession] — thread safety and message management.
+ * Tests for [ChatSession] — Job-based cancellation, message management, thread safety.
  */
 class ChatSessionTest {
     @Test
@@ -46,40 +50,79 @@ class ChatSessionTest {
     }
 
     @Test
-    fun `streaming state transitions`() {
+    fun `isStreaming false when no job assigned`() {
         val session = ChatSession()
-        assertFalse(session.isStreaming, "Should not be streaming initially")
-        assertFalse(session.cancelled.get(), "Should not be cancelled initially")
-
-        session.startStreaming()
-        assertTrue(session.isStreaming, "Should be streaming after start")
-        assertFalse(session.cancelled.get(), "Should not be cancelled after start")
-
-        session.cancelStreaming()
-        assertTrue(session.cancelled.get(), "Should be cancelled after cancel")
-        assertFalse(session.isStreaming, "Should not be streaming after cancel")
-
-        session.stopStreaming()
-        assertFalse(session.isStreaming, "Should not be streaming after stop")
+        assertFalse(session.isStreaming)
+        assertNull(session.streamingJob)
     }
 
     @Test
-    fun `clear resets all state`() {
+    fun `isStreaming true when active job assigned`() =
+        runTest {
+            val session = ChatSession()
+            session.streamingJob =
+                launch {
+                    delay(10_000) // Long-running task
+                }
+            assertTrue(session.isStreaming, "Should be streaming with active job")
+            session.cancelStreaming()
+        }
+
+    @Test
+    fun `cancelStreaming cancels active job`() =
+        runTest {
+            val session = ChatSession()
+            val job =
+                launch {
+                    delay(10_000)
+                }
+            session.streamingJob = job
+            assertTrue(job.isActive)
+
+            session.cancelStreaming()
+            assertTrue(job.isCancelled, "Job should be cancelled")
+            assertFalse(session.isStreaming, "Should not be streaming after cancel")
+            assertNull(session.streamingJob, "streamingJob should be cleared")
+        }
+
+    @Test
+    fun `cancelStreaming is safe when no job`() {
         val session = ChatSession()
-        session.addUserMessage("hello")
-        session.addAssistantMessage("world")
-        session.startStreaming()
+        // Should not throw
         session.cancelStreaming()
-
-        // Preconditions — state is dirty
-        assertEquals(2, session.messages.size, "Should have 2 messages before clear")
-        assertTrue(session.cancelled.get(), "Should be cancelled before clear")
-
-        session.clear()
-        assertTrue(session.messages.isEmpty(), "Messages should be cleared")
-        assertFalse(session.isStreaming, "Streaming should be stopped")
-        assertFalse(session.cancelled.get(), "Cancelled should be reset")
+        assertFalse(session.isStreaming)
     }
+
+    @Test
+    fun `isStreaming false after job completes naturally`() =
+        runTest {
+            val session = ChatSession()
+            val job =
+                launch {
+                    // Completes immediately
+                }
+            session.streamingJob = job
+            job.join()
+            assertFalse(session.isStreaming, "Should not be streaming after job completes")
+        }
+
+    @Test
+    fun `clear resets all state`() =
+        runTest {
+            val session = ChatSession()
+            session.addUserMessage("hello")
+            session.addAssistantMessage("world")
+            session.streamingJob = launch { delay(10_000) }
+
+            // Preconditions — state is dirty
+            assertEquals(2, session.messages.size, "Should have 2 messages before clear")
+            assertTrue(session.isStreaming, "Should be streaming before clear")
+
+            session.clear()
+            assertTrue(session.messages.isEmpty(), "Messages should be cleared")
+            assertFalse(session.isStreaming, "Streaming should be stopped")
+            assertNull(session.streamingJob, "streamingJob should be null")
+        }
 
     @Test
     fun `messages list is thread-safe for concurrent access`() {
@@ -100,17 +143,30 @@ class ChatSessionTest {
     }
 
     @Test
-    fun `multiple streaming cycles work correctly`() {
+    fun `multiple streaming cycles work correctly`() =
+        runTest {
+            val session = ChatSession()
+
+            // First cycle
+            val job1 = launch { delay(10_000) }
+            session.streamingJob = job1
+            session.cancelStreaming()
+            assertTrue(job1.isCancelled)
+
+            // Second cycle — new job should work
+            val job2 = launch { delay(10_000) }
+            session.streamingJob = job2
+            assertTrue(session.isStreaming, "Should be streaming with new job")
+            session.cancelStreaming()
+        }
+
+    @Test
+    fun `messages returns immutable snapshot`() {
         val session = ChatSession()
-
-        // First cycle
-        session.startStreaming()
-        session.cancelStreaming()
-        session.stopStreaming()
-
-        // Second cycle — cancelled should be reset
-        session.startStreaming()
-        assertFalse(session.cancelled.get(), "Cancelled should be reset for new stream")
-        session.stopStreaming()
+        session.addUserMessage("hello")
+        val snapshot = session.messages
+        session.addUserMessage("world")
+        assertEquals(1, snapshot.size, "Snapshot should not be affected by later adds")
+        assertEquals(2, session.messages.size, "Current messages should have both")
     }
 }

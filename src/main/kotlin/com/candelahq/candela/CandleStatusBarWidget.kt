@@ -3,17 +3,23 @@ package com.candelahq.candela
 import com.candelahq.candela.client.CandelaClient
 import com.candelahq.candela.client.DashboardData
 import com.candelahq.candela.settings.CandleSettings
-import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.StatusBar
 import com.intellij.openapi.wm.StatusBarWidget
 import com.intellij.openapi.wm.StatusBarWidgetFactory
 import com.intellij.util.Consumer
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.awt.Component
 import java.awt.event.MouseEvent
-import java.util.concurrent.Executors
-import java.util.concurrent.ScheduledFuture
-import java.util.concurrent.TimeUnit
 
 class CandleStatusBarWidgetFactory : StatusBarWidgetFactory {
     override fun getId(): String = "CandelaStatusBar"
@@ -31,7 +37,11 @@ class CandleStatusBarWidget(
     StatusBarWidget.TextPresentation {
     companion object {
         const val ID = "CandelaStatusBar"
+        private const val OFFLINE_BACKOFF_MS = 300_000L // 5 minutes
+        private const val BUDGET_WARNING_COOLDOWN_MS = 30 * 60 * 1000L // 30 minutes
     }
+
+    private val log = Logger.getInstance(CandleStatusBarWidget::class.java)
 
     private var statusBar: StatusBar? = null
 
@@ -44,15 +54,13 @@ class CandleStatusBarWidget(
     @Volatile
     private var lastData: DashboardData? = null
 
-    private val scheduler =
-        Executors.newSingleThreadScheduledExecutor { r ->
-            Thread(r, "candela-status-bar").apply { isDaemon = true }
-        }
+    /** Coroutine scope for this widget — cancelled in [dispose]. */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    @Volatile
-    private var refreshTask: ScheduledFuture<*>? = null
+    private var refreshJob: Job? = null
     private var client: CandelaClient? = null
     private var activeServerUrl: String = ""
+    private var lastBudgetWarningMs: Long = 0L
 
     override fun ID(): String = ID
 
@@ -62,14 +70,11 @@ class CandleStatusBarWidget(
         this.statusBar = statusBar
         val settings = CandleSettings.getInstance().state
         client = CandelaClient(settings.serverUrl, cacheTtlMs = 30_000)
-        scheduleRefresh(settings.autoRefreshIntervalSeconds)
-        // Immediate first fetch
-        scheduler.submit { refresh() }
+        startRefreshLoop(settings.autoRefreshIntervalSeconds)
     }
 
     override fun dispose() {
-        refreshTask?.cancel(true)
-        scheduler.shutdownNow()
+        scope.cancel("StatusBarWidget disposed")
     }
 
     // ── TextPresentation ──────────────────────────────────────────────────
@@ -92,76 +97,76 @@ class CandleStatusBarWidget(
     fun forceRefresh() {
         client?.invalidateCache()
         client?.resetHealth()
-        scheduler.submit { refresh() }
+        refreshJob?.cancel()
+        startRefreshLoop(CandleSettings.getInstance().state.autoRefreshIntervalSeconds)
     }
 
-    private fun scheduleRefresh(intervalSeconds: Int) {
-        refreshTask?.cancel(false)
+    private fun startRefreshLoop(intervalSeconds: Int) {
+        refreshJob?.cancel()
         if (intervalSeconds <= 0) return
-        refreshTask =
-            scheduler.scheduleAtFixedRate(
-                {
-                    try {
-                        refresh()
-                    } catch (_: Throwable) {
-                        // Prevent silent scheduler termination
-                    }
-                },
-                intervalSeconds.toLong(),
-                intervalSeconds.toLong(),
-                TimeUnit.SECONDS,
-            )
+        refreshJob =
+            scope.launch {
+                // Immediate first fetch
+                refresh()
+                // Then loop at the configured interval
+                while (true) {
+                    delay(intervalSeconds * 1000L)
+                    refresh()
+                }
+            }
     }
 
-    private fun refresh() {
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun refresh() {
         val settings = CandleSettings.getInstance().state
         val serverUrl = settings.serverUrl
         if (serverUrl != activeServerUrl) {
             activeServerUrl = serverUrl
             client = CandelaClient(serverUrl, cacheTtlMs = 30_000)
         }
-        val data = client?.getDashboardData()
-        if (data == null) {
-            currentText = "🕯️ offline"
-            currentTooltip = "Candela is not running"
-            // Back off to 5 minutes when offline
-            refreshTask?.cancel(false)
-            refreshTask =
-                scheduler.scheduleAtFixedRate(
-                    {
-                        try {
-                            refresh()
-                        } catch (_: Throwable) {
-                            // Prevent silent scheduler termination
-                        }
-                    },
-                    300,
-                    300,
-                    TimeUnit.SECONDS,
-                )
-        } else {
-            lastData = data
-            currentText = formatStatusText(data)
-            currentTooltip = formatTooltip(data)
 
-            // Check for budget warning
-            val settings = CandleSettings.getInstance().state
-            val threshold = settings.budgetWarningThreshold
-            data.budget?.let { budget ->
-                if (budget.percentUsed >= threshold) {
-                    ApplicationManager.getApplication().invokeLater {
-                        CandleNotifications.showBudgetWarning(project, budget)
+        try {
+            val data = client?.getDashboardData()
+            if (data == null) {
+                currentText = "🕯️ offline"
+                currentTooltip = "Candela is not running"
+                log.info("Candela status: offline")
+                // Back off when offline
+                delay(OFFLINE_BACKOFF_MS)
+            } else {
+                lastData = data
+                currentText = formatStatusText(data)
+                currentTooltip = formatTooltip(data)
+
+                // Check for budget warning (with cooldown to prevent notification spam)
+                val threshold = settings.budgetWarningThreshold
+                data.budget?.let { budget ->
+                    val now = System.currentTimeMillis()
+                    if (budget.percentUsed >= threshold && (now - lastBudgetWarningMs) > BUDGET_WARNING_COOLDOWN_MS) {
+                        lastBudgetWarningMs = now
+                        withContext(Dispatchers.Main) {
+                            CandleNotifications.showBudgetWarning(project, budget)
+                        }
                     }
                 }
             }
-
-            // Restore normal polling interval
-            val interval = CandleSettings.getInstance().state.autoRefreshIntervalSeconds
-            scheduleRefresh(interval)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log.warn("Status bar refresh failed", e)
+            currentText = "🕯️ offline"
+            currentTooltip = "Candela is not running"
         }
 
-        ApplicationManager.getApplication().invokeLater {
-            statusBar?.updateWidget(ID)
+        // Update the status bar widget on EDT (protected to not crash the loop)
+        try {
+            withContext(Dispatchers.Main) {
+                statusBar?.updateWidget(ID)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log.warn("Failed to update status bar widget", e)
         }
     }
 

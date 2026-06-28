@@ -4,7 +4,6 @@ import com.candelahq.candela.client.ChatClient
 import com.candelahq.candela.client.ChunkUsage
 import com.candelahq.candela.settings.CandleSettings
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditorManager
@@ -14,6 +13,12 @@ import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.util.ui.JBUI
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Cursor
@@ -44,7 +49,8 @@ import javax.swing.text.html.HTMLEditorKit
  * - CENTER: scrollable message area
  * - SOUTH: input area with send/stop button
  *
- * Implements [Disposable] to clean up resources when the tool window is closed.
+ * Uses a [CoroutineScope] tied to the panel lifecycle for all async work.
+ * Implements [Disposable] to cancel the scope when the tool window is closed.
  */
 class ChatPanel(
     private val project: Project,
@@ -52,6 +58,9 @@ class ChatPanel(
     Disposable {
     private val chatClient = ChatClient()
     private val session = ChatSession()
+
+    /** Coroutine scope for this panel — cancelled in [dispose]. */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     // ── UI Components ────────────────────────────────────────────────────
 
@@ -84,14 +93,14 @@ class ChatPanel(
     private var streamingTextPane: JTextPane? = null
 
     // Thread-safe buffer for accumulating streaming tokens.
-    // Written on the pooled thread, read on EDT — StringBuffer is synchronized.
+    // Written on IO dispatcher, read on EDT — StringBuffer is synchronized.
     @Volatile
     private var streamingContent = StringBuffer()
 
     // Throttle UI updates during streaming to avoid O(n²) re-rendering.
-    // Tracks the last time we dispatched an updateStreamingBubble() call to the EDT.
     private val lastUiUpdateMs = AtomicLong(0L)
 
+    @Volatile
     private var disposed = false
 
     init {
@@ -117,9 +126,8 @@ class ChatPanel(
 
     override fun dispose() {
         disposed = true
-        if (session.isStreaming) {
-            session.cancelStreaming()
-        }
+        scope.cancel("ChatPanel disposed")
+        session.cancelStreaming()
         streamingTextPane = null
         ChatPanelService.getInstance(project).panel = null
         log.info("ChatPanel disposed for project: ${project.name}")
@@ -198,7 +206,7 @@ class ChatPanel(
 
     private fun doSend() {
         if (session.isStreaming) {
-            // Button is in "Stop" mode
+            // Button is in "Stop" mode — cancel the streaming coroutine
             session.cancelStreaming()
             sendButton.text = "Send"
             return
@@ -218,10 +226,9 @@ class ChatPanel(
         addUserBubble(text)
 
         // Prepare streaming
-        session.startStreaming()
-        sendButton.text = "Stop"
         streamingContent = StringBuffer()
         lastUiUpdateMs.set(0L)
+        sendButton.text = "Stop"
 
         val assistantPane = addAssistantBubble("")
         streamingTextPane = assistantPane
@@ -236,63 +243,74 @@ class ChatPanel(
 
         log.info("Sending chat request: model=$model, messages=${messages.size}")
 
-        ApplicationManager.getApplication().executeOnPooledThread {
-            chatClient.streamChat(
-                baseUrl = baseUrl,
-                model = model,
-                messages = messages,
-                maxTokens = maxTokens,
-                cancelled = session.cancelled,
-                onToken = { token ->
-                    streamingContent.append(token)
-                    // Throttle UI updates: render at most every STREAM_THROTTLE_MS
-                    val now = System.currentTimeMillis()
-                    if (now - lastUiUpdateMs.get() >= STREAM_THROTTLE_MS) {
-                        lastUiUpdateMs.set(now)
-                        val snapshot = streamingContent.toString()
-                        SwingUtilities.invokeLater {
-                            if (!disposed) {
-                                updateStreamingBubble(snapshot)
+        // Launch streaming coroutine — Job stored in session for cancellation
+        session.streamingJob =
+            scope.launch {
+                try {
+                    chatClient.streamChat(
+                        baseUrl = baseUrl,
+                        model = model,
+                        messages = messages,
+                        maxTokens = maxTokens,
+                        onToken = { token ->
+                            streamingContent.append(token)
+                            // Throttle UI updates: render at most every STREAM_THROTTLE_MS
+                            val now = System.currentTimeMillis()
+                            if (now - lastUiUpdateMs.get() >= STREAM_THROTTLE_MS) {
+                                lastUiUpdateMs.set(now)
+                                val snapshot = streamingContent.toString()
+                                SwingUtilities.invokeLater {
+                                    if (!disposed) {
+                                        updateStreamingBubble(snapshot)
+                                    }
+                                }
                             }
-                        }
-                    }
-                },
-                onComplete = { usage ->
-                    session.stopStreaming()
-                    val finalContent = streamingContent.toString()
-                    // addAssistantMessage is now thread-safe via CopyOnWriteArrayList
-                    session.addAssistantMessage(finalContent)
+                        },
+                        onComplete = { usage ->
+                            val finalContent = streamingContent.toString()
+                            session.addAssistantMessage(finalContent)
+                            SwingUtilities.invokeLater {
+                                if (!disposed) {
+                                    updateStreamingBubble(finalContent)
+                                    addCodeBlockActions(finalContent)
+                                    if (usage != null) {
+                                        addTokenInfo(usage)
+                                    }
+                                    sendButton.text = "Send"
+                                    streamingTextPane = null
+                                }
+                            }
+                        },
+                        onError = { error ->
+                            log.warn("Chat stream error", error)
+                            SwingUtilities.invokeLater {
+                                if (!disposed) {
+                                    addErrorMessage("Error: ${error.message ?: "Unknown error"}")
+                                    sendButton.text = "Send"
+                                    streamingTextPane = null
+                                }
+                            }
+                        },
+                    )
+                } catch (_: CancellationException) {
+                    // Stream was cancelled by user — update UI
                     SwingUtilities.invokeLater {
                         if (!disposed) {
-                            updateStreamingBubble(finalContent)
-                            addCodeBlockActions(finalContent)
-                            if (usage != null) {
-                                addTokenInfo(usage)
+                            val partial = streamingContent.toString()
+                            if (partial.isNotEmpty()) {
+                                updateStreamingBubble(partial)
+                                session.addAssistantMessage(partial)
                             }
                             sendButton.text = "Send"
                             streamingTextPane = null
                         }
                     }
-                },
-                onError = { error ->
-                    session.stopStreaming()
-                    log.warn("Chat stream error", error)
-                    SwingUtilities.invokeLater {
-                        if (!disposed) {
-                            addErrorMessage("Error: ${error.message ?: "Unknown error"}")
-                            sendButton.text = "Send"
-                            streamingTextPane = null
-                        }
-                    }
-                },
-            )
-        }
+                }
+            }
     }
 
     private fun clearChat() {
-        if (session.isStreaming) {
-            session.cancelStreaming()
-        }
+        session.cancelStreaming()
         session.clear()
         messagesPanel.removeAll()
         messagesPanel.revalidate()
@@ -303,28 +321,27 @@ class ChatPanel(
     }
 
     private fun loadModels() {
-        ApplicationManager.getApplication().executeOnPooledThread {
+        scope.launch {
             val settings = CandleSettings.getInstance().state
             val models = chatClient.fetchModels(settings.chatServerUrl)
-            SwingUtilities.invokeLater {
-                if (disposed) return@invokeLater
-                modelSelector.removeAllItems()
-                for (model in models) {
-                    modelSelector.addItem(model.id)
-                }
-                // Restore persisted selection
-                val defaultModel = settings.defaultModel
-                if (defaultModel.isNotEmpty()) {
-                    for (i in 0 until modelSelector.itemCount) {
-                        if (modelSelector.getItemAt(i) == defaultModel) {
-                            modelSelector.selectedIndex = i
-                            break
-                        }
+            // Back on Dispatchers.Main after fetchModels() suspends — safe for Swing
+            if (disposed) return@launch
+            modelSelector.removeAllItems()
+            for (model in models) {
+                modelSelector.addItem(model.id)
+            }
+            // Restore persisted selection
+            val defaultModel = settings.defaultModel
+            if (defaultModel.isNotEmpty()) {
+                for (i in 0 until modelSelector.itemCount) {
+                    if (modelSelector.getItemAt(i) == defaultModel) {
+                        modelSelector.selectedIndex = i
+                        break
                     }
                 }
-                if (models.isEmpty()) {
-                    modelSelector.addItem("(no models — check connection)")
-                }
+            }
+            if (models.isEmpty()) {
+                modelSelector.addItem("(no models — check connection)")
             }
         }
     }

@@ -140,4 +140,79 @@ class MarkdownRendererTest {
         assertTrue(result.contains("<i>italic</i>"), "Expected italic")
         assertTrue(result.contains("<code"), "Expected code")
     }
+
+    @Test
+    fun `code fence language label is HTML-escaped`() {
+        // The regex only captures \w* as language, so <img onerror=alert(1)> won't be
+        // a valid fenced block language. The raw text falls through and gets HTML-escaped.
+        val md = "```<img onerror=alert(1)>\ncode\n```"
+        val result = MarkdownRenderer.renderToHtml(md)
+        assertTrue(result.contains("&lt;img"), "XSS payload in language position must be escaped, got: $result")
+        assertFalse(result.contains("<img"), "Raw <img> tag must not appear in output, got: $result")
+    }
+
+    @Test
+    fun `code fence language with special characters is escaped`() {
+        // Characters like &, ", <, > are not word characters, so they won't be captured
+        // as a language label. They should still be HTML-escaped in the output.
+        val md = "```&\"<>\ncode\n```"
+        val result = MarkdownRenderer.renderToHtml(md)
+        assertTrue(result.contains("&amp;"), "Ampersand must be escaped, got: $result")
+        assertTrue(result.contains("&quot;"), "Double quote must be escaped, got: $result")
+        assertTrue(result.contains("&lt;"), "Less-than must be escaped, got: $result")
+        assertTrue(result.contains("&gt;"), "Greater-than must be escaped, got: $result")
+    }
+
+    @Test
+    fun `nested code blocks handle backtick edge cases`() {
+        // Backtick characters inside a code block should be preserved literally
+        val md = "```kotlin\nval s = \"`hello`\"\n```"
+        val result = MarkdownRenderer.renderToHtml(md)
+        assertTrue(result.contains("<pre"), "Expected pre tag, got: $result")
+        assertTrue(result.contains("`hello`"), "Backticks inside code block should be preserved, got: $result")
+    }
+
+    @Test
+    fun `multiple code blocks with different languages`() {
+        val md = "```kotlin\nfun greet() = 42\n```\n\n```python\ndef greet(): pass\n```\n\n```rust\nfn greet() -> i32 { 42 }\n```"
+        val result = MarkdownRenderer.renderToHtml(md)
+        assertTrue(result.contains("kotlin"), "Expected kotlin language label, got: $result")
+        assertTrue(result.contains("python"), "Expected python language label, got: $result")
+        assertTrue(result.contains("rust"), "Expected rust language label, got: $result")
+        // Each content string is unique to its block — no substring overlap
+        assertTrue(result.contains("fun greet() = 42"), "Expected kotlin code content, got: $result")
+        assertTrue(result.contains("def greet(): pass"), "Expected python code content, got: $result")
+        assertTrue(result.contains("fn greet() -&gt; i32 { 42 }"), "Expected rust code content (HTML-escaped), got: $result")
+    }
+
+    @Test
+    fun `XSS in inline text is escaped`() {
+        val result = MarkdownRenderer.renderToHtml("<script>alert('xss')</script>")
+        assertFalse(result.contains("<script>"), "Script tag must be escaped in inline text, got: $result")
+        assertTrue(result.contains("&lt;script&gt;"), "Expected escaped script tag, got: $result")
+        assertTrue(result.contains("&lt;/script&gt;"), "Expected escaped closing script tag, got: $result")
+    }
+
+    @Test
+    fun `bold and italic inside code blocks are not processed`() {
+        val md = "```\n**bold** and *italic*\n```"
+        val result = MarkdownRenderer.renderToHtml(md)
+        assertFalse(result.contains("<b>"), "Bold should not be processed inside code blocks, got: $result")
+        assertFalse(result.contains("<i>"), "Italic should not be processed inside code blocks, got: $result")
+        assertTrue(result.contains("**bold**"), "Raw bold markers should be preserved in code, got: $result")
+        assertTrue(result.contains("*italic*"), "Raw italic markers should be preserved in code, got: $result")
+    }
+
+    @Test
+    fun `empty language label in code fence`() {
+        val md = "```\nsome code\n```"
+        val result = MarkdownRenderer.renderToHtml(md)
+        assertTrue(result.contains("<pre"), "Expected pre tag for code block, got: $result")
+        assertTrue(result.contains("some code"), "Expected code content, got: $result")
+        // When language is empty, no language label div should be emitted
+        assertFalse(
+            result.contains("font-size: 9px") && result.contains("<div"),
+            "No language label div should be emitted for empty language, got: $result",
+        )
+    }
 }
