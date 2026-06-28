@@ -62,12 +62,19 @@ class ChatPanel(
     private val chatClient = ChatClient()
     private val session = ChatSession()
 
-    /** Coroutine scope — child of the project-level scope, cancelled in [dispose]. */
+    /**
+     * Coroutine scope — child of the project-level scope, cancelled in [dispose].
+     * Inherits full parent context (modality, tracing) and adds a [SupervisorJob]
+     * so individual operation failures don't cancel the scope.
+     */
     private val scope =
-        CoroutineScope(
-            SupervisorJob(project.service<CandelaCoroutineService>().scope.coroutineContext[Job]) +
-                Dispatchers.Main.immediate,
-        )
+        project.service<CandelaCoroutineService>().scope.let { parentScope ->
+            CoroutineScope(
+                parentScope.coroutineContext +
+                    SupervisorJob(parentScope.coroutineContext[Job]) +
+                    Dispatchers.Main.immediate,
+            )
+        }
 
     // ── UI Components ────────────────────────────────────────────────────
 
