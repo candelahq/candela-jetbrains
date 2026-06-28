@@ -428,7 +428,8 @@ class CandelaClientTest {
             job.cancel()
             job.join()
 
-            assertTrue(job.isCancelled, "Job should be cancelled — CE must not be swallowed")
+            assertTrue(caughtCE, "CancellationException must propagate through isAlive()")
+            assertTrue(job.isCancelled, "Job should be cancelled")
         }
 
     @Test
@@ -462,7 +463,8 @@ class CandelaClientTest {
             job.cancel()
             job.join()
 
-            assertTrue(job.isCancelled, "Job should be cancelled — CE must not be swallowed")
+            assertTrue(caughtCE, "CancellationException must propagate through getDashboardData()")
+            assertTrue(job.isCancelled, "Job should be cancelled")
         }
 
     // ── Legacy Fanout ─────────────────────────────────────────────────────

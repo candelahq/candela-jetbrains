@@ -174,14 +174,15 @@ class MarkdownRendererTest {
 
     @Test
     fun `multiple code blocks with different languages`() {
-        val md = "```kotlin\nval x = 1\n```\n\n```python\nx = 1\n```\n\n```rust\nlet x = 1;\n```"
+        val md = "```kotlin\nfun greet() = 42\n```\n\n```python\ndef greet(): pass\n```\n\n```rust\nfn greet() -> i32 { 42 }\n```"
         val result = MarkdownRenderer.renderToHtml(md)
         assertTrue(result.contains("kotlin"), "Expected kotlin language label, got: $result")
         assertTrue(result.contains("python"), "Expected python language label, got: $result")
         assertTrue(result.contains("rust"), "Expected rust language label, got: $result")
-        assertTrue(result.contains("val x = 1"), "Expected kotlin code content, got: $result")
-        assertTrue(result.contains("x = 1"), "Expected python code content, got: $result")
-        assertTrue(result.contains("let x = 1;"), "Expected rust code content, got: $result")
+        // Each content string is unique to its block — no substring overlap
+        assertTrue(result.contains("fun greet() = 42"), "Expected kotlin code content, got: $result")
+        assertTrue(result.contains("def greet(): pass"), "Expected python code content, got: $result")
+        assertTrue(result.contains("fn greet() -&gt; i32 { 42 }"), "Expected rust code content (HTML-escaped), got: $result")
     }
 
     @Test

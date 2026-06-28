@@ -1,6 +1,7 @@
 package com.candelahq.candela.client
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
@@ -10,6 +11,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
@@ -319,7 +321,8 @@ class ChatClientTest {
     @Test
     fun `streamChat coroutine cancellation stops stream`() =
         runTest {
-            // Use a slow response to simulate a long stream
+            // Use a throttled response so tokens are delivered slowly.
+            // This proves cancellation actually stops the stream mid-flight.
             val sseBody =
                 """
                 data: {"id":"1","object":"chat.completion.chunk","choices":[{"delta":{"content":"tok1"},"index":0}]}
@@ -336,10 +339,12 @@ class ChatClientTest {
                 MockResponse()
                     .setResponseCode(200)
                     .setHeader("Content-Type", "text/event-stream")
-                    .setBody(sseBody),
+                    .setBody(sseBody)
+                    .throttleBody(40, 200, TimeUnit.MILLISECONDS),
             )
 
             val tokens = mutableListOf<String>()
+            var completeCalled = false
             val job =
                 launch {
                     client.streamChat(
@@ -354,7 +359,7 @@ class ChatClientTest {
                                 this.coroutineContext[kotlinx.coroutines.Job]?.cancel()
                             }
                         },
-                        onComplete = {},
+                        onComplete = { completeCalled = true },
                         onError = {},
                     )
                 }
@@ -365,8 +370,10 @@ class ChatClientTest {
                 // Expected
             }
 
-            // Should have received at least one token before cancellation
+            // Should have received first token but stream should stop before DONE
             assertTrue(tokens.isNotEmpty(), "Should have received at least one token")
+            assertFalse(completeCalled, "onComplete should NOT fire — stream was cancelled")
+            assertTrue(tokens.size < 3, "Should not receive all tokens after cancellation, got: $tokens")
         }
 
     @Test
@@ -500,18 +507,23 @@ class ChatClientTest {
                     .setBodyDelay(5, TimeUnit.SECONDS),
             )
 
+            var caughtCE = false
             val job =
                 launch {
-                    client.fetchModels(baseUrl)
+                    try {
+                        client.fetchModels(baseUrl)
+                    } catch (_: CancellationException) {
+                        caughtCE = true
+                        throw CancellationException("re-propagate")
+                    }
                 }
-            // Cancel immediately — the request is blocked on body delay
+            // Let coroutine enter fetchModels before cancelling
+            delay(50)
             job.cancel()
             job.join()
 
-            // If CancellationException were swallowed, the job would complete
-            // normally (isCompleted=true, isCancelled=false). Because fetchModels
-            // re-throws it, the job is properly cancelled.
-            assertTrue(job.isCancelled, "CancellationException should propagate, not be swallowed")
+            assertTrue(caughtCE, "CancellationException must propagate through fetchModels()")
+            assertTrue(job.isCancelled, "Job should be cancelled")
         }
 
     @Test
