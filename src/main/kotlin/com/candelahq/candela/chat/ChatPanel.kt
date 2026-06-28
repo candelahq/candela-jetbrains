@@ -3,6 +3,7 @@ package com.candelahq.candela.chat
 import com.candelahq.candela.CandelaCoroutineService
 import com.candelahq.candela.client.ChatClient
 import com.candelahq.candela.client.ChunkUsage
+import com.candelahq.candela.client.StreamEvent
 import com.candelahq.candela.settings.CandleSettings
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.command.WriteCommandAction
@@ -281,59 +282,65 @@ class ChatPanel(
         session.streamingJob =
             scope.launch {
                 try {
-                    chatClient.streamChat(
-                        baseUrl = baseUrl,
-                        model = model,
-                        messages = messages,
-                        maxTokens = maxTokens,
-                        onToken = { token ->
-                            streamingContent.append(token)
-                            // Remove thinking indicator on first token
-                            if (firstTokenReceived.compareAndSet(false, true)) {
-                                SwingUtilities.invokeLater {
-                                    removeThinkingIndicator()
+                    chatClient
+                        .streamChat(
+                            baseUrl = baseUrl,
+                            model = model,
+                            messages = messages,
+                            maxTokens = maxTokens,
+                        ).collect { event ->
+                            when (event) {
+                                is StreamEvent.Token -> {
+                                    streamingContent.append(event.content)
+                                    // Remove thinking indicator on first token
+                                    if (firstTokenReceived.compareAndSet(false, true)) {
+                                        SwingUtilities.invokeLater {
+                                            removeThinkingIndicator()
+                                        }
+                                    }
+                                    // Throttle UI updates: render at most every STREAM_THROTTLE_MS
+                                    val now = System.currentTimeMillis()
+                                    if (now - lastUiUpdateMs.get() >= STREAM_THROTTLE_MS) {
+                                        lastUiUpdateMs.set(now)
+                                        val snapshot = streamingContent.toString()
+                                        SwingUtilities.invokeLater {
+                                            if (!disposed && streamGeneration.get() == thisGeneration) {
+                                                updateStreamingBubble(snapshot)
+                                            }
+                                        }
+                                    }
                                 }
-                            }
-                            // Throttle UI updates: render at most every STREAM_THROTTLE_MS
-                            val now = System.currentTimeMillis()
-                            if (now - lastUiUpdateMs.get() >= STREAM_THROTTLE_MS) {
-                                lastUiUpdateMs.set(now)
-                                val snapshot = streamingContent.toString()
-                                SwingUtilities.invokeLater {
-                                    if (!disposed && streamGeneration.get() == thisGeneration) {
-                                        updateStreamingBubble(snapshot)
+
+                                is StreamEvent.Complete -> {
+                                    val finalContent = streamingContent.toString()
+                                    session.addAssistantMessage(finalContent)
+                                    SwingUtilities.invokeLater {
+                                        if (!disposed && streamGeneration.get() == thisGeneration) {
+                                            removeThinkingIndicator()
+                                            updateStreamingBubble(finalContent)
+                                            addCodeBlockActions(finalContent)
+                                            if (event.usage != null) {
+                                                addTokenInfo(event.usage)
+                                            }
+                                            sendButton.text = "Send"
+                                            streamingTextPane = null
+                                        }
+                                    }
+                                }
+
+                                is StreamEvent.Error -> {
+                                    log.warn("Chat stream error", event.exception)
+                                    SwingUtilities.invokeLater {
+                                        if (!disposed && streamGeneration.get() == thisGeneration) {
+                                            removeThinkingIndicator()
+                                            addErrorMessage("Error: ${event.exception.message ?: "Unknown error"}")
+                                            sendButton.text = "Send"
+                                            streamingTextPane = null
+                                        }
                                     }
                                 }
                             }
-                        },
-                        onComplete = { usage ->
-                            val finalContent = streamingContent.toString()
-                            session.addAssistantMessage(finalContent)
-                            SwingUtilities.invokeLater {
-                                if (!disposed && streamGeneration.get() == thisGeneration) {
-                                    removeThinkingIndicator()
-                                    updateStreamingBubble(finalContent)
-                                    addCodeBlockActions(finalContent)
-                                    if (usage != null) {
-                                        addTokenInfo(usage)
-                                    }
-                                    sendButton.text = "Send"
-                                    streamingTextPane = null
-                                }
-                            }
-                        },
-                        onError = { error ->
-                            log.warn("Chat stream error", error)
-                            SwingUtilities.invokeLater {
-                                if (!disposed && streamGeneration.get() == thisGeneration) {
-                                    removeThinkingIndicator()
-                                    addErrorMessage("Error: ${error.message ?: "Unknown error"}")
-                                    sendButton.text = "Send"
-                                    streamingTextPane = null
-                                }
-                            }
-                        },
-                    )
+                        }
                 } catch (_: CancellationException) {
                     // Stream was cancelled by user — update UI
                     SwingUtilities.invokeLater {
