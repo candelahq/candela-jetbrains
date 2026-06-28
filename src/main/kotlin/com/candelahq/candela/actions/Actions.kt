@@ -1,5 +1,6 @@
 package com.candelahq.candela.actions
 
+import com.candelahq.candela.CandelaCoroutineService
 import com.candelahq.candela.CandleNotifications
 import com.candelahq.candela.CandleStatusBarWidget
 import com.candelahq.candela.client.CandelaClient
@@ -8,34 +9,25 @@ import com.intellij.ide.BrowserUtil
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.components.service
+import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.wm.WindowManager
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Shared coroutine scope for fire-and-forget actions.
- * Cancelled via [cancelActionScope] (e.g. during plugin unload).
- * Uses [SupervisorJob] so individual action failures don't cancel other actions.
- */
-private val actionScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-
-/** Cancel the shared action scope — called during plugin disposal if needed. */
-@Suppress("unused")
-fun cancelActionScope() = actionScope.cancel("Plugin unloading")
-
-/**
  * Fetch dashboard data and show a notification.
  * Shared implementation for [ShowCostSummaryAction] and [CheckBudgetAction].
+ *
+ * Uses the project-scoped [CandelaCoroutineService] so coroutines are
+ * automatically cancelled when the project closes.
  */
 private fun fetchAndShowDashboard(e: AnActionEvent) {
     val project = e.project ?: return
     val settings = CandleSettings.getInstance().state
     val client = CandelaClient(settings.serverUrl)
-    actionScope.launch {
+    project.service<CandelaCoroutineService>().scope.launch {
         val data = client.getDashboardData()
         withContext(Dispatchers.Main) {
             if (data != null) {
@@ -47,19 +39,25 @@ private fun fetchAndShowDashboard(e: AnActionEvent) {
     }
 }
 
-class ShowCostSummaryAction : AnAction() {
+class ShowCostSummaryAction :
+    AnAction(),
+    DumbAware {
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
     override fun actionPerformed(e: AnActionEvent) = fetchAndShowDashboard(e)
 }
 
-class CheckBudgetAction : AnAction() {
+class CheckBudgetAction :
+    AnAction(),
+    DumbAware {
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
     override fun actionPerformed(e: AnActionEvent) = fetchAndShowDashboard(e)
 }
 
-class OpenDashboardAction : AnAction() {
+class OpenDashboardAction :
+    AnAction(),
+    DumbAware {
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
     override fun actionPerformed(e: AnActionEvent) {
@@ -68,7 +66,9 @@ class OpenDashboardAction : AnAction() {
     }
 }
 
-class RefreshStatusAction : AnAction() {
+class RefreshStatusAction :
+    AnAction(),
+    DumbAware {
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
     override fun actionPerformed(e: AnActionEvent) {

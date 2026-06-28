@@ -1,10 +1,12 @@
 package com.candelahq.candela.chat
 
+import com.candelahq.candela.CandelaCoroutineService
 import com.candelahq.candela.client.ChatClient
 import com.candelahq.candela.client.ChunkUsage
 import com.candelahq.candela.settings.CandleSettings
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.command.WriteCommandAction
+import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.ide.CopyPasteManager
@@ -16,6 +18,7 @@ import com.intellij.util.ui.JBUI
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -59,8 +62,12 @@ class ChatPanel(
     private val chatClient = ChatClient()
     private val session = ChatSession()
 
-    /** Coroutine scope for this panel — cancelled in [dispose]. */
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    /** Coroutine scope — child of the project-level scope, cancelled in [dispose]. */
+    private val scope =
+        CoroutineScope(
+            SupervisorJob(project.service<CandelaCoroutineService>().scope.coroutineContext[Job]) +
+                Dispatchers.Main.immediate,
+        )
 
     // ── UI Components ────────────────────────────────────────────────────
 

@@ -3,6 +3,7 @@ package com.candelahq.candela
 import com.candelahq.candela.client.CandelaClient
 import com.candelahq.candela.client.DashboardData
 import com.candelahq.candela.settings.CandleSettings
+import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.StatusBar
@@ -14,7 +15,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -54,8 +54,12 @@ class CandleStatusBarWidget(
     @Volatile
     private var lastData: DashboardData? = null
 
-    /** Coroutine scope for this widget — cancelled in [dispose]. */
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /** Coroutine scope — child of the project-level scope, cancelled in [dispose]. */
+    private val scope =
+        CoroutineScope(
+            SupervisorJob(project.service<CandelaCoroutineService>().scope.coroutineContext[Job]) +
+                Dispatchers.Default,
+        )
 
     private var refreshJob: Job? = null
     private var client: CandelaClient? = null
@@ -74,7 +78,8 @@ class CandleStatusBarWidget(
     }
 
     override fun dispose() {
-        scope.cancel("StatusBarWidget disposed")
+        refreshJob?.cancel()
+        scope.coroutineContext[Job]?.cancel()
     }
 
     // ── TextPresentation ──────────────────────────────────────────────────
@@ -131,7 +136,9 @@ class CandleStatusBarWidget(
                 currentText = "🕯️ offline"
                 currentTooltip = "Candela is not running"
                 log.info("Candela status: offline")
-                // Back off when offline
+                // Update widget immediately so UI reflects offline state
+                updateWidgetOnEdt()
+                // Then back off before next attempt
                 delay(OFFLINE_BACKOFF_MS)
             } else {
                 lastData = data
@@ -158,7 +165,12 @@ class CandleStatusBarWidget(
             currentTooltip = "Candela is not running"
         }
 
-        // Update the status bar widget on EDT (protected to not crash the loop)
+        // Update the status bar widget on EDT
+        updateWidgetOnEdt()
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun updateWidgetOnEdt() {
         try {
             withContext(Dispatchers.Main) {
                 statusBar?.updateWidget(ID)
