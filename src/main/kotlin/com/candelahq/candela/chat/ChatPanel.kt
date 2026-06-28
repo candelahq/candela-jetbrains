@@ -114,6 +114,13 @@ class ChatPanel(
     // Throttle UI updates during streaming to avoid O(n²) re-rendering.
     private val lastUiUpdateMs = AtomicLong(0L)
 
+    /**
+     * Monotonically-increasing stream generation ID.
+     * Prevents stale [SwingUtilities.invokeLater] callbacks from a cancelled
+     * stream from writing into the current stream's UI.
+     */
+    private val streamGeneration = AtomicLong(0L)
+
     @Volatile
     private var disposed = false
 
@@ -242,6 +249,7 @@ class ChatPanel(
         // Prepare streaming
         streamingContent = StringBuffer()
         lastUiUpdateMs.set(0L)
+        val thisGeneration = streamGeneration.incrementAndGet()
         sendButton.text = "Stop"
 
         val assistantPane = addAssistantBubble("")
@@ -274,7 +282,7 @@ class ChatPanel(
                                 lastUiUpdateMs.set(now)
                                 val snapshot = streamingContent.toString()
                                 SwingUtilities.invokeLater {
-                                    if (!disposed) {
+                                    if (!disposed && streamGeneration.get() == thisGeneration) {
                                         updateStreamingBubble(snapshot)
                                     }
                                 }
@@ -284,7 +292,7 @@ class ChatPanel(
                             val finalContent = streamingContent.toString()
                             session.addAssistantMessage(finalContent)
                             SwingUtilities.invokeLater {
-                                if (!disposed) {
+                                if (!disposed && streamGeneration.get() == thisGeneration) {
                                     updateStreamingBubble(finalContent)
                                     addCodeBlockActions(finalContent)
                                     if (usage != null) {
@@ -298,7 +306,7 @@ class ChatPanel(
                         onError = { error ->
                             log.warn("Chat stream error", error)
                             SwingUtilities.invokeLater {
-                                if (!disposed) {
+                                if (!disposed && streamGeneration.get() == thisGeneration) {
                                     addErrorMessage("Error: ${error.message ?: "Unknown error"}")
                                     sendButton.text = "Send"
                                     streamingTextPane = null
@@ -309,7 +317,7 @@ class ChatPanel(
                 } catch (_: CancellationException) {
                     // Stream was cancelled by user — update UI
                     SwingUtilities.invokeLater {
-                        if (!disposed) {
+                        if (!disposed && streamGeneration.get() == thisGeneration) {
                             val partial = streamingContent.toString()
                             if (partial.isNotEmpty()) {
                                 updateStreamingBubble(partial)
