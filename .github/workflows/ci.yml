@@ -3,11 +3,11 @@
 # Jobs:
 #   lint           — ktlint + detekt (parallel, ~30s)
 #   unit-test      — JUnit 5 unit tests, no IDE sandbox (parallel, ~30s)
-#   platform-test  — JUnit 3 platform tests, full IDE sandbox (advisory)
-#                    NOTE: IDE sandbox tearDown is very slow on CI (~10 min
-#                    between tests). These run as advisory (continue-on-error)
-#                    and don't block the build. Run them in IntelliJ IDE locally.
 #   build          — plugin build & verification (after lint + unit-test)
+#
+# Platform tests (BasePlatformTestCase) are NOT run in CI because the IDE
+# sandbox tearDown is too slow on GitHub Actions (~10 min between tests).
+# Run them locally: `make platform-test` or via IntelliJ IDE test runner.
 #
 # Mirrors the CI patterns from the main candela repo.
 
@@ -67,26 +67,6 @@ jobs:
           --tests "com.candelahq.candela.actions.ActionsTest"
           --tests "com.candelahq.candela.chat.*Test"
           --tests "com.candelahq.candela.client.*"
-
-  platform-test:
-    name: Platform Test (Advisory)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 21
-      - uses: gradle/actions/setup-gradle@v4
-      - name: Run platform tests (JUnit 3 / IDE sandbox)
-        run: >-
-          xvfb-run --auto-servernum
-          ./gradlew test
-          --tests "com.candelahq.candela.settings.CandleSettingsPlatformTest"
-          --tests "com.candelahq.candela.actions.CodeContextPlatformTest"
-          --tests "com.candelahq.candela.actions.ActionUpdatePlatformTest"
 
   build:
     name: Build

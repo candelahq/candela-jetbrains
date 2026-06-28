@@ -39,6 +39,15 @@ pre-commit:
 
 pre-push:
   commands:
+    platform-test-reminder:
+      run: |
+        echo ""
+        echo "💡 Reminder: Platform tests are NOT run in CI."
+        echo "   Run them locally before merging:"
+        echo "   make platform-test"
+        echo "   (or right-click *PlatformTest in IntelliJ)"
+        echo ""
+
     gradle-build:
       run: nix develop -c ./gradlew buildPlugin
 
