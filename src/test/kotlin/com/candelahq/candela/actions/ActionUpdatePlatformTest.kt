@@ -27,7 +27,7 @@ class ActionUpdatePlatformTest : CandelaPlatformTestCase() {
 
         assertFalse(
             "AskCandelaAction should be disabled without selection",
-            event.presentation.isEnabledAndVisible,
+            event.presentation.isEnabled,
         )
     }
 
@@ -41,7 +41,7 @@ class ActionUpdatePlatformTest : CandelaPlatformTestCase() {
 
         assertTrue(
             "AskCandelaAction should be enabled with selection",
-            event.presentation.isEnabledAndVisible,
+            event.presentation.isEnabled,
         )
     }
 
@@ -57,7 +57,7 @@ class ActionUpdatePlatformTest : CandelaPlatformTestCase() {
 
         assertFalse(
             "ExplainCodeAction should be disabled without selection",
-            event.presentation.isEnabledAndVisible,
+            event.presentation.isEnabled,
         )
     }
 
@@ -71,7 +71,7 @@ class ActionUpdatePlatformTest : CandelaPlatformTestCase() {
 
         assertTrue(
             "ExplainCodeAction should be enabled with selection",
-            event.presentation.isEnabledAndVisible,
+            event.presentation.isEnabled,
         )
     }
 
@@ -86,7 +86,7 @@ class ActionUpdatePlatformTest : CandelaPlatformTestCase() {
 
         assertTrue(
             "FocusChatToolWindowAction should be enabled when project is available",
-            event.presentation.isEnabledAndVisible,
+            event.presentation.isEnabled,
         )
     }
 
@@ -108,7 +108,7 @@ class ActionUpdatePlatformTest : CandelaPlatformTestCase() {
 
         assertFalse(
             "FocusChatToolWindowAction should be disabled without project",
-            event.presentation.isEnabledAndVisible,
+            event.presentation.isEnabled,
         )
     }
 

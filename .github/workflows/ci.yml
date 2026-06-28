@@ -1,9 +1,10 @@
 # Candela JetBrains — CI Pipeline
 #
 # Jobs:
-#   lint  — ktlint + detekt (parallel)
-#   test  — unit tests (parallel)
-#   build — plugin build & verification (after lint + test pass)
+#   lint           — ktlint + detekt (parallel, ~30s)
+#   unit-test      — JUnit 5 unit tests, no IDE sandbox (parallel, ~30s)
+#   platform-test  — JUnit 3 platform tests, full IDE sandbox (parallel, ~5m)
+#   build          — plugin build & verification (after all pass)
 #
 # Mirrors the CI patterns from the main candela repo.
 
@@ -40,8 +41,32 @@ jobs:
       - name: Static analysis (detekt)
         run: ./gradlew detekt
 
-  test:
-    name: Test
+  unit-test:
+    name: Unit Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Run unit tests (JUnit 5)
+        run: >-
+          ./gradlew test
+          --tests "com.candelahq.candela.BackoffTest"
+          --tests "com.candelahq.candela.BuildCodeFenceTest"
+          --tests "com.candelahq.candela.CodeContextTest"
+          --tests "com.candelahq.candela.CoroutineScopeLifecycleTest"
+          --tests "com.candelahq.candela.StatusBar*"
+          --tests "com.candelahq.candela.Stream*"
+          --tests "com.candelahq.candela.actions.ActionsTest"
+          --tests "com.candelahq.candela.chat.*Test"
+          --tests "com.candelahq.candela.client.*"
+
+  platform-test:
+    name: Platform Test
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -51,12 +76,16 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: gradle/actions/setup-gradle@v4
-      - name: Run tests
-        run: ./gradlew test
+      - name: Run platform tests (JUnit 3 / IDE sandbox)
+        run: >-
+          ./gradlew test
+          --tests "com.candelahq.candela.settings.CandleSettingsPlatformTest"
+          --tests "com.candelahq.candela.actions.CodeContextPlatformTest"
+          --tests "com.candelahq.candela.actions.ActionUpdatePlatformTest"
 
   build:
     name: Build
-    needs: [lint, test]
+    needs: [lint, unit-test, platform-test]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
