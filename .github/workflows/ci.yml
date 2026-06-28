@@ -79,7 +79,7 @@ jobs:
       - name: Run platform tests (JUnit 3 / IDE sandbox)
         run: >-
           xvfb-run --auto-servernum
-          ./gradlew test --info
+          ./gradlew test
           --tests "com.candelahq.candela.settings.CandleSettingsPlatformTest"
           --tests "com.candelahq.candela.actions.CodeContextPlatformTest"
           --tests "com.candelahq.candela.actions.ActionUpdatePlatformTest"
