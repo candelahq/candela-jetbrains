@@ -11,7 +11,7 @@ import java.time.Duration
  *
  * Configuration:
  * - 10-second connect timeout (suitable for both local and remote servers)
- * - HTTP/1.1 (SSE requires it; HTTP/2 is negotiated automatically if available)
+ * - Default HTTP/2 preference (negotiated via ALPN; falls back to HTTP/1.1)
  */
 object SharedHttpClient {
     val instance: HttpClient =

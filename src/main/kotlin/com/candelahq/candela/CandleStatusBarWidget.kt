@@ -52,7 +52,7 @@ class CandleStatusBarWidget(
             val exponential = INITIAL_BACKOFF_MS * (1L shl (consecutiveFailures - 1).coerceIn(0, 10))
             val capped = exponential.coerceAtMost(MAX_BACKOFF_MS)
             val jitter = (capped * JITTER_FACTOR * (2 * Math.random() - 1)).toLong()
-            return (capped + jitter).coerceAtLeast(INITIAL_BACKOFF_MS / 2)
+            return (capped + jitter).coerceIn(INITIAL_BACKOFF_MS / 2, MAX_BACKOFF_MS)
         }
     }
 

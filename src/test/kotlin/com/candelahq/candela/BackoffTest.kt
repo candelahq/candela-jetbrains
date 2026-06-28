@@ -33,7 +33,10 @@ class BackoffTest {
     fun `backoff caps at 5 minutes`() {
         val results = (1..100).map { CandleStatusBarWidget.calculateBackoff(20) }
         val max = results.max()
-        assertTrue(max <= 360_000L, "Max backoff should not exceed 360s (5min + 20% jitter), got: ${max}ms")
+        assertTrue(
+            max <= CandleStatusBarWidget.MAX_BACKOFF_MS,
+            "Max backoff should not exceed ${CandleStatusBarWidget.MAX_BACKOFF_MS}ms, got: ${max}ms",
+        )
     }
 
     @Test
