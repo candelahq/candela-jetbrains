@@ -2,10 +2,10 @@ package com.candelahq.candela.client
 
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.future.await
 import kotlinx.coroutines.withContext
 import java.net.URI
 import java.net.http.HttpClient
@@ -61,6 +61,8 @@ class CandelaClient(
                         .build()
                 val res = http.send(req, HttpResponse.BodyHandlers.ofString())
                 (res.statusCode() in 200..299).also { alive = it }
+            } catch (e: CancellationException) {
+                throw e
             } catch (
                 @Suppress("TooGenericExceptionCaught")
                 _: Exception,
@@ -110,6 +112,8 @@ class CandelaClient(
 
                 val json = gson.fromJson(res.body(), JsonObject::class.java)
                 parseDashboardResponse(json)
+            } catch (e: CancellationException) {
+                throw e
             } catch (
                 @Suppress("TooGenericExceptionCaught")
                 _: Exception,
@@ -119,28 +123,24 @@ class CandelaClient(
         }
 
     private suspend fun legacyFanout(hours: Int): DashboardData? =
-        coroutineScope {
+        withContext(Dispatchers.IO) {
             try {
                 val timeRange = buildTimeRangeBody(hours)
 
-                // Fan out two requests concurrently
-                val summaryDeferred =
-                    async(Dispatchers.IO) {
-                        http.send(
-                            buildRpcRequest("candela.v1.DashboardService/GetUsageSummary", timeRange),
-                            HttpResponse.BodyHandlers.ofString(),
-                        )
-                    }
-                val budgetDeferred =
-                    async(Dispatchers.IO) {
-                        http.send(
-                            buildRpcRequest("candela.v1.UserService/GetMyBudget", JsonObject()),
-                            HttpResponse.BodyHandlers.ofString(),
-                        )
-                    }
+                // Fan out two non-blocking requests concurrently via sendAsync().await()
+                val summaryFuture =
+                    http.sendAsync(
+                        buildRpcRequest("candela.v1.DashboardService/GetUsageSummary", timeRange),
+                        HttpResponse.BodyHandlers.ofString(),
+                    )
+                val budgetFuture =
+                    http.sendAsync(
+                        buildRpcRequest("candela.v1.UserService/GetMyBudget", JsonObject()),
+                        HttpResponse.BodyHandlers.ofString(),
+                    )
 
                 var usage = UsageSummary()
-                val summaryRes = summaryDeferred.await()
+                val summaryRes = summaryFuture.await()
                 if (summaryRes.statusCode() in 200..299) {
                     val s = gson.fromJson(summaryRes.body(), JsonObject::class.java)
                     usage = parseUsageSummary(s)
@@ -150,7 +150,7 @@ class CandelaClient(
                 var activeGrants: List<GrantInfo> = emptyList()
                 var totalRemainingUsd: Double? = null
 
-                val budgetRes = budgetDeferred.await()
+                val budgetRes = budgetFuture.await()
                 if (budgetRes.statusCode() in 200..299) {
                     val b = gson.fromJson(budgetRes.body(), JsonObject::class.java)
                     budget = parseBudget(b.getAsJsonObject("budget"))
@@ -160,6 +160,8 @@ class CandelaClient(
                 }
 
                 DashboardData(usage, emptyList(), budget, activeGrants, totalRemainingUsd)
+            } catch (e: CancellationException) {
+                throw e
             } catch (
                 @Suppress("TooGenericExceptionCaught")
                 _: Exception,

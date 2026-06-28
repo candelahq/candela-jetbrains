@@ -3,8 +3,10 @@ package com.candelahq.candela.client
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.intellij.openapi.diagnostic.Logger
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -32,6 +34,11 @@ class ChatClient {
             .build()
     private val gson = Gson()
 
+    companion object {
+        /** Maximum accumulated stream content size (2 MB). Prevents OOM on malicious servers. */
+        private const val MAX_STREAM_BYTES = 2 * 1024 * 1024L
+    }
+
     /**
      * Fetch available models from GET /v1/models.
      *
@@ -57,6 +64,8 @@ class ChatClient {
                 } else {
                     emptyList()
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (
                 @Suppress("TooGenericExceptionCaught")
                 e: Exception,
@@ -111,15 +120,20 @@ class ChatClient {
             val response = client.send(request, HttpResponse.BodyHandlers.ofInputStream())
 
             if (response.statusCode() !in 200..299) {
-                val errorBody = response.body().bufferedReader().use { it.readText() }
+                val errorBody = response.body().use { it.bufferedReader().readText().take(1000) }
                 onError(RuntimeException("Chat API returned ${response.statusCode()}: $errorBody"))
                 return@withContext
             }
 
             var lastUsage: ChunkUsage? = null
             var doneReceived = false
+            var totalBytes = 0L
 
-            BufferedReader(InputStreamReader(response.body(), Charsets.UTF_8)).use { reader ->
+            // Close the InputStream on cancellation to unblock readLine()
+            val inputStream = response.body()
+            coroutineContext.job.invokeOnCompletion { inputStream.close() }
+
+            BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8)).use { reader ->
                 var line = reader.readLine()
                 @Suppress("LoopWithTooManyJumpStatements") // SSE protocol parsing
                 while (line != null) {
@@ -160,6 +174,12 @@ class ChatClient {
                             val content = choice?.delta?.content ?: ""
 
                             if (content.isNotEmpty()) {
+                                totalBytes += content.length
+                                if (totalBytes > MAX_STREAM_BYTES) {
+                                    log.warn("Stream exceeded ${MAX_STREAM_BYTES / 1024}KB limit, aborting")
+                                    onError(RuntimeException("Response too large (>${MAX_STREAM_BYTES / 1024}KB) — aborting"))
+                                    return@withContext
+                                }
                                 onToken(content)
                             }
                         }

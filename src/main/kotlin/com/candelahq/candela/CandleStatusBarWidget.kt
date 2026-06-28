@@ -3,6 +3,7 @@ package com.candelahq.candela
 import com.candelahq.candela.client.CandelaClient
 import com.candelahq.candela.client.DashboardData
 import com.candelahq.candela.settings.CandleSettings
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.StatusBar
 import com.intellij.openapi.wm.StatusBarWidget
@@ -16,7 +17,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.swing.Swing
 import kotlinx.coroutines.withContext
 import java.awt.Component
 import java.awt.event.MouseEvent
@@ -38,7 +38,10 @@ class CandleStatusBarWidget(
     companion object {
         const val ID = "CandelaStatusBar"
         private const val OFFLINE_BACKOFF_MS = 300_000L // 5 minutes
+        private const val BUDGET_WARNING_COOLDOWN_MS = 30 * 60 * 1000L // 30 minutes
     }
+
+    private val log = Logger.getInstance(CandleStatusBarWidget::class.java)
 
     private var statusBar: StatusBar? = null
 
@@ -57,6 +60,7 @@ class CandleStatusBarWidget(
     private var refreshJob: Job? = null
     private var client: CandelaClient? = null
     private var activeServerUrl: String = ""
+    private var lastBudgetWarningMs: Long = 0L
 
     override fun ID(): String = ID
 
@@ -126,6 +130,7 @@ class CandleStatusBarWidget(
             if (data == null) {
                 currentText = "🕯️ offline"
                 currentTooltip = "Candela is not running"
+                log.info("Candela status: offline")
                 // Back off when offline
                 delay(OFFLINE_BACKOFF_MS)
             } else {
@@ -133,26 +138,35 @@ class CandleStatusBarWidget(
                 currentText = formatStatusText(data)
                 currentTooltip = formatTooltip(data)
 
-                // Check for budget warning
+                // Check for budget warning (with cooldown to prevent notification spam)
                 val threshold = settings.budgetWarningThreshold
                 data.budget?.let { budget ->
-                    if (budget.percentUsed >= threshold) {
-                        withContext(Dispatchers.Swing) {
+                    val now = System.currentTimeMillis()
+                    if (budget.percentUsed >= threshold && (now - lastBudgetWarningMs) > BUDGET_WARNING_COOLDOWN_MS) {
+                        lastBudgetWarningMs = now
+                        withContext(Dispatchers.Main) {
                             CandleNotifications.showBudgetWarning(project, budget)
                         }
                     }
                 }
             }
-        } catch (_: CancellationException) {
-            throw CancellationException()
-        } catch (_: Exception) {
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log.warn("Status bar refresh failed", e)
             currentText = "🕯️ offline"
             currentTooltip = "Candela is not running"
         }
 
-        // Update the status bar widget on EDT
-        withContext(Dispatchers.Swing) {
-            statusBar?.updateWidget(ID)
+        // Update the status bar widget on EDT (protected to not crash the loop)
+        try {
+            withContext(Dispatchers.Main) {
+                statusBar?.updateWidget(ID)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            log.warn("Failed to update status bar widget", e)
         }
     }
 

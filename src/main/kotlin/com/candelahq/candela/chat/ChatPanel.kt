@@ -100,6 +100,7 @@ class ChatPanel(
     // Throttle UI updates during streaming to avoid O(n²) re-rendering.
     private val lastUiUpdateMs = AtomicLong(0L)
 
+    @Volatile
     private var disposed = false
 
     init {

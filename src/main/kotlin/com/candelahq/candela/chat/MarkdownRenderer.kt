@@ -80,7 +80,7 @@ object MarkdownRenderer {
             val langLabel =
                 if (lang.isNotEmpty()) {
                     "<div style=\"font-size: 9px; color: ${colorToHex(langLabelColor())}; " +
-                        "padding: 2px 8px; font-family: sans-serif;\">$lang</div>"
+                        "padding: 2px 8px; font-family: sans-serif;\">${escapeHtml(lang)}</div>"
                 } else {
                     ""
                 }

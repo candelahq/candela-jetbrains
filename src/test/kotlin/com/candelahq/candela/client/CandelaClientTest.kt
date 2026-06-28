@@ -243,22 +243,38 @@ class CandelaClientTest {
     @Test
     fun `getDashboardData falls back to legacy fanout on 404`() =
         runTest {
-            // Health check
-            server.enqueue(MockResponse().setResponseCode(200))
-            // Consolidated endpoint returns 404 (not supported)
-            server.enqueue(MockResponse().setResponseCode(404))
-            // Legacy summary endpoint
-            server.enqueue(
-                MockResponse()
-                    .setResponseCode(200)
-                    .setBody("""{"total_input_tokens": 50, "total_output_tokens": 25, "total_cost_usd": 0.05, "total_llm_calls": 2}"""),
-            )
-            // Legacy budget endpoint
-            server.enqueue(
-                MockResponse()
-                    .setResponseCode(200)
-                    .setBody("""{"budget": {"limit_usd": 5.0, "spent_usd": 1.0}, "total_remaining_usd": 4.0, "active_grants": []}"""),
-            )
+            // Use a dispatcher to match responses by path, since legacyFanout
+            // fires two concurrent async requests whose order is non-deterministic.
+            server.dispatcher =
+                object : okhttp3.mockwebserver.Dispatcher() {
+                    private var dashboardCalled = false
+
+                    override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
+                        val path = request.path ?: ""
+                        return when {
+                            path.contains("/healthz") ->
+                                MockResponse().setResponseCode(200)
+                            path.contains("GetDashboardData") && !dashboardCalled -> {
+                                dashboardCalled = true
+                                MockResponse().setResponseCode(404)
+                            }
+                            path.contains("GetUsageSummary") ->
+                                MockResponse()
+                                    .setResponseCode(200)
+                                    .setBody(
+                                        """{"total_input_tokens": 50, "total_output_tokens": 25, "total_cost_usd": 0.05, "total_llm_calls": 2}""",
+                                    )
+                            path.contains("GetMyBudget") ->
+                                MockResponse()
+                                    .setResponseCode(200)
+                                    .setBody(
+                                        """{"budget": {"limit_usd": 5.0, "spent_usd": 1.0}, "total_remaining_usd": 4.0, "active_grants": []}""",
+                                    )
+                            else ->
+                                MockResponse().setResponseCode(404)
+                        }
+                    }
+                }
 
             val client = CandelaClient(baseUrl)
             val data = client.getDashboardData()
@@ -272,14 +288,25 @@ class CandelaClientTest {
     @Test
     fun `getDashboardData returns empty data when all endpoints return errors`() =
         runTest {
-            // Health check
-            server.enqueue(MockResponse().setResponseCode(200))
-            // Consolidated fails
-            server.enqueue(MockResponse().setResponseCode(500))
-            // Legacy summary fails with 500 (still parsed as empty)
-            server.enqueue(MockResponse().setResponseCode(500))
-            // Legacy budget fails with 500
-            server.enqueue(MockResponse().setResponseCode(500))
+            // Use a dispatcher since legacyFanout fires concurrent async requests.
+            server.dispatcher =
+                object : okhttp3.mockwebserver.Dispatcher() {
+                    private var dashboardCalled = false
+
+                    override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
+                        val path = request.path ?: ""
+                        return when {
+                            path.contains("/healthz") ->
+                                MockResponse().setResponseCode(200)
+                            path.contains("GetDashboardData") && !dashboardCalled -> {
+                                dashboardCalled = true
+                                MockResponse().setResponseCode(500)
+                            }
+                            else ->
+                                MockResponse().setResponseCode(500)
+                        }
+                    }
+                }
 
             val client = CandelaClient(baseUrl)
             val data = client.getDashboardData()
