@@ -16,7 +16,15 @@ import java.util.concurrent.CopyOnWriteArrayList
  *        used by [ChatHistoryService] to persist to SQLite.
  */
 class ChatSession(
-    private val onMessageAdded: ((role: String, content: String) -> Unit)? = null,
+    private val onMessageAdded: (
+        (
+            role: String,
+            content: String,
+            model: String?,
+            tokenCount: Int?,
+            costUsd: Double?,
+        ) -> Unit
+    )? = null,
 ) {
     private val _messages = CopyOnWriteArrayList<ChatMessage>()
 
@@ -35,12 +43,17 @@ class ChatSession(
 
     fun addUserMessage(content: String) {
         _messages.add(ChatMessage("user", content))
-        onMessageAdded?.invoke("user", content)
+        onMessageAdded?.invoke("user", content, null, null, null)
     }
 
-    fun addAssistantMessage(content: String) {
+    fun addAssistantMessage(
+        content: String,
+        model: String? = null,
+        tokenCount: Int? = null,
+        costUsd: Double? = null,
+    ) {
         _messages.add(ChatMessage("assistant", content))
-        onMessageAdded?.invoke("assistant", content)
+        onMessageAdded?.invoke("assistant", content, model, tokenCount, costUsd)
     }
 
     /** Cancel the current streaming response (if any). */

@@ -9,6 +9,21 @@ import com.candelahq.candela.CandelaPlatformTestCase
  * settings via [loadState] / [getState] roundtrips.
  */
 class CandleSettingsPlatformTest : CandelaPlatformTestCase() {
+    private lateinit var originalState: CandleSettings.State
+
+    override fun setUp() {
+        super.setUp()
+        originalState = CandleSettings.getInstance().state.copy()
+    }
+
+    override fun tearDown() {
+        try {
+            CandleSettings.getInstance().loadState(originalState)
+        } finally {
+            super.tearDown()
+        }
+    }
+
     fun testDefaultSettingsValues() {
         val settings = CandleSettings.getInstance()
         val state = settings.state

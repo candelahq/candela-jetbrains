@@ -4,6 +4,11 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.guessProjectDir
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import java.util.UUID
 
 /**
@@ -22,8 +27,11 @@ class ChatHistoryService(
 ) : Disposable {
     private val log = Logger.getInstance(ChatHistoryService::class.java)
 
+    /** IO-bound scope for background DB writes; cancelled on dispose. */
+    val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     private val db: ChatDatabase by lazy {
-        val basePath = project.basePath ?: System.getProperty("user.home")
+        val basePath = project.guessProjectDir()?.path ?: System.getProperty("user.home")
         val dbPath = "$basePath/.candela/chat.db"
         ChatDatabase(dbPath)
     }
@@ -47,11 +55,19 @@ class ChatHistoryService(
     }
 
     /**
-     * Ensure an active session exists. Creates one if needed.
+     * Ensure an active session exists.
+     * Prefers resuming the most recently persisted session, otherwise creates one.
      */
     fun ensureActiveSession(model: String = ""): String {
         activeSessionId?.let { id ->
             if (db.getSession(id) != null) return id
+        }
+        // Try to resume the most recent persisted session
+        val mostRecent = db.getSessions().firstOrNull()
+        if (mostRecent != null) {
+            activeSessionId = mostRecent.id
+            log.info("Resumed most recent session: ${mostRecent.id}")
+            return mostRecent.id
         }
         return newSession(model)
     }
@@ -137,6 +153,7 @@ class ChatHistoryService(
     // ── Lifecycle ─────────────────────────────────────────────────────────
 
     override fun dispose() {
+        ioScope.cancel("ChatHistoryService disposed")
         db.close()
         log.info("ChatHistoryService disposed for project: ${project.name}")
     }

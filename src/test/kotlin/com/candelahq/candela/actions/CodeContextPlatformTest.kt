@@ -115,14 +115,10 @@ class CodeContextPlatformTest : CandelaPlatformTestCase() {
 
         val ctx = extractCodeContext(buildActionEvent())
         assertNotNull(ctx)
-        // Enclosing class/function detection depends on PSI + selection
         // The selection marker above should create a selection in the fixture
-        if (myFixture.editor.selectionModel.hasSelection()) {
-            // If PSI correctly resolves, we should get the enclosing class
-            ctx!!.enclosingClass?.let { className ->
-                assertEquals("MyService", className)
-            }
-        }
+        assertTrue("Selection should be present", myFixture.editor.selectionModel.hasSelection())
+        // Enclosing class/function detection depends on PSI + selection
+        assertEquals("MyService", ctx!!.enclosingClass)
     }
 
     fun testNoSelectionReturnsNullLineRange() {

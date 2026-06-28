@@ -5,6 +5,7 @@ import java.io.File
 import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.ResultSet
+import java.util.Locale
 
 /**
  * SQLite database wrapper for chat history persistence.
@@ -26,13 +27,22 @@ class ChatDatabase(
         connection = DriverManager.getConnection("jdbc:sqlite:$dbPath")
         connection.autoCommit = true
 
-        // Enable WAL mode for concurrent reads during streaming
-        execute("PRAGMA journal_mode=WAL")
-        execute("PRAGMA foreign_keys=ON")
-        execute("PRAGMA busy_timeout=5000")
+        try {
+            // Enable WAL mode for concurrent reads during streaming
+            execute("PRAGMA journal_mode=WAL")
+            execute("PRAGMA foreign_keys=ON")
+            execute("PRAGMA busy_timeout=5000")
 
-        migrate()
-        log.info("ChatDatabase opened: $dbPath")
+            migrate()
+            log.info("ChatDatabase opened: $dbPath")
+        } catch (ex: Exception) {
+            try {
+                connection.close()
+            } catch (closeEx: Exception) {
+                ex.addSuppressed(closeEx)
+            }
+            throw ex
+        }
     }
 
     // ── Schema ────────────────────────────────────────────────────────────
@@ -197,23 +207,31 @@ class ChatDatabase(
         model: String? = null,
         tokenCount: Int? = null,
         costUsd: Double? = null,
+        createdAt: Long = System.currentTimeMillis(),
     ): Long {
-        val now = System.currentTimeMillis()
-        val ps =
-            connection.prepareStatement(
-                "INSERT INTO messages (session_id, role, content, model, token_count, cost_usd, created_at) " +
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                java.sql.Statement.RETURN_GENERATED_KEYS,
-            )
-        ps.use {
-            it.setString(1, sessionId)
-            it.setString(2, role)
-            it.setString(3, content)
-            it.setString(4, model)
-            if (tokenCount != null) it.setInt(5, tokenCount) else it.setNull(5, java.sql.Types.INTEGER)
-            if (costUsd != null) it.setDouble(6, costUsd) else it.setNull(6, java.sql.Types.REAL)
-            it.setLong(7, now)
-            it.executeUpdate()
+        val savedAutoCommit = connection.autoCommit
+        try {
+            connection.autoCommit = false
+            val ps =
+                connection.prepareStatement(
+                    "INSERT INTO messages (session_id, role, content, model, token_count, cost_usd, created_at) " +
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    java.sql.Statement.RETURN_GENERATED_KEYS,
+                )
+            val generatedId: Long
+            ps.use {
+                it.setString(1, sessionId)
+                it.setString(2, role)
+                it.setString(3, content)
+                it.setString(4, model)
+                if (tokenCount != null) it.setInt(5, tokenCount) else it.setNull(5, java.sql.Types.INTEGER)
+                if (costUsd != null) it.setDouble(6, costUsd) else it.setNull(6, java.sql.Types.REAL)
+                it.setLong(7, createdAt)
+                it.executeUpdate()
+
+                val keys = it.generatedKeys
+                generatedId = if (keys.next()) keys.getLong(1) else -1
+            }
 
             // Update session denormalized counters
             prepareAndExecute(
@@ -225,15 +243,24 @@ class ChatDatabase(
                     total_cost_usd = COALESCE((SELECT SUM(cost_usd) FROM messages WHERE session_id = ?), 0.0)
                 WHERE id = ?
                 """.trimIndent(),
-                now,
+                createdAt,
                 sessionId,
                 sessionId,
                 sessionId,
                 sessionId,
             )
 
-            val keys = it.generatedKeys
-            return if (keys.next()) keys.getLong(1) else -1
+            connection.commit()
+            return generatedId
+        } catch (ex: Exception) {
+            try {
+                connection.rollback()
+            } catch (rollbackEx: Exception) {
+                log.warn("Rollback failed after insert error", rollbackEx)
+            }
+            throw ex
+        } finally {
+            connection.autoCommit = savedAutoCommit
         }
     }
 
@@ -241,7 +268,7 @@ class ChatDatabase(
     fun getMessages(sessionId: String): List<MessageRow> =
         query(
             "SELECT id, session_id, role, content, model, token_count, cost_usd, created_at " +
-                "FROM messages WHERE session_id = ? ORDER BY created_at ASC",
+                "FROM messages WHERE session_id = ? ORDER BY created_at ASC, id ASC",
             sessionId,
         ) { rs ->
             MessageRow(
@@ -260,26 +287,31 @@ class ChatDatabase(
 
     @Synchronized
     fun searchMessages(queryText: String): List<SearchResult> =
-        query(
-            """
-            SELECT m.id, m.session_id, m.role, m.content, m.created_at, s.title as session_title
-            FROM messages_fts fts
-            JOIN messages m ON m.id = fts.rowid
-            JOIN sessions s ON s.id = m.session_id
-            WHERE messages_fts MATCH ?
-            ORDER BY rank
-            LIMIT 50
-            """.trimIndent(),
-            queryText,
-        ) { rs ->
-            SearchResult(
-                messageId = rs.getLong("id"),
-                sessionId = rs.getString("session_id"),
-                sessionTitle = rs.getString("session_title"),
-                role = rs.getString("role"),
-                content = rs.getString("content"),
-                createdAt = rs.getLong("created_at"),
-            )
+        try {
+            query(
+                """
+                SELECT m.id, m.session_id, m.role, m.content, m.created_at, s.title as session_title
+                FROM messages_fts fts
+                JOIN messages m ON m.id = fts.rowid
+                JOIN sessions s ON s.id = m.session_id
+                WHERE messages_fts MATCH ?
+                ORDER BY rank
+                LIMIT 50
+                """.trimIndent(),
+                queryText,
+            ) { rs ->
+                SearchResult(
+                    messageId = rs.getLong("id"),
+                    sessionId = rs.getString("session_id"),
+                    sessionTitle = rs.getString("session_title"),
+                    role = rs.getString("role"),
+                    content = rs.getString("content"),
+                    createdAt = rs.getLong("created_at"),
+                )
+            }
+        } catch (ex: Exception) {
+            log.warn("FTS5 search failed for query: $queryText", ex)
+            emptyList()
         }
 
     // ── Export ─────────────────────────────────────────────────────────────
@@ -288,12 +320,13 @@ class ChatDatabase(
     fun exportSessionToMarkdown(sessionId: String): String? {
         val session = getSession(sessionId) ?: return null
         val messages = getMessages(sessionId)
+        val formattedCost = String.format(Locale.US, "%.4f", session.totalCostUsd)
         return buildString {
             appendLine("# ${session.title}")
             appendLine()
             appendLine(
                 "Model: ${session.model} | Messages: ${session.messageCount} | " +
-                    "Tokens: ${session.totalTokens} | Cost: $${String.format("%.4f", session.totalCostUsd)}",
+                    "Tokens: ${session.totalTokens} | Cost: \$$formattedCost",
             )
             appendLine()
             appendLine("---")
@@ -368,9 +401,13 @@ class ChatDatabase(
     }
 
     override fun close() {
-        if (!connection.isClosed) {
-            connection.close()
-            log.info("ChatDatabase closed")
+        try {
+            if (!connection.isClosed) {
+                connection.close()
+                log.info("ChatDatabase closed")
+            }
+        } catch (ex: Exception) {
+            log.warn("Error closing ChatDatabase connection", ex)
         }
     }
 }

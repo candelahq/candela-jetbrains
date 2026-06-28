@@ -26,6 +26,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Cursor
@@ -66,8 +67,10 @@ class ChatPanel(
     private val chatClient = ChatClient()
     private val historyService = ChatHistoryService.getInstance(project)
     private val session =
-        ChatSession { role, content ->
-            historyService.saveMessage(role, content)
+        ChatSession { role, content, model, tokenCount, costUsd ->
+            historyService.ioScope.launch {
+                historyService.saveMessage(role, content, model, tokenCount, costUsd)
+            }
         }
 
     /**
@@ -146,16 +149,22 @@ class ChatPanel(
      * Rebuilds the UI with persisted messages.
      */
     private fun restoreActiveSession() {
-        val sessionId = historyService.ensureActiveSession()
-        val messages = historyService.getMessages(sessionId)
-        if (messages.isNotEmpty()) {
-            session.restoreMessages(
-                messages.map {
-                    com.candelahq.candela.client
-                        .ChatMessage(it.role, it.content)
-                },
-            )
-            rebuildChatUI()
+        scope.launch {
+            val sessionId: String
+            val messages: List<MessageRow>
+            withContext(Dispatchers.IO) {
+                sessionId = historyService.ensureActiveSession()
+                messages = historyService.getMessages(sessionId)
+            }
+            if (messages.isNotEmpty()) {
+                session.restoreMessages(
+                    messages.map {
+                        com.candelahq.candela.client
+                            .ChatMessage(it.role, it.content)
+                    },
+                )
+                SwingUtilities.invokeLater { rebuildChatUI() }
+            }
         }
     }
 
@@ -413,8 +422,12 @@ class ChatPanel(
         messagesPanel.repaint()
         sendButton.text = "Send"
         streamingTextPane = null
-        // Create a new persisted session
-        historyService.newSession()
+        // Create a new persisted session off EDT
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                historyService.newSession()
+            }
+        }
         addInfoMessage("Conversation cleared. Start a new chat.")
     }
 

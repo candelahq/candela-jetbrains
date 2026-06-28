@@ -57,8 +57,10 @@ class ChatDatabaseTest {
     @Test
     fun `get sessions returns sorted by updatedAt desc`() {
         db.createSession("old")
-        Thread.sleep(10)
+        // Insert a message with a later timestamp to update the session's updated_at
+        db.insertMessage("old", "user", "msg", createdAt = 1000L)
         db.createSession("new")
+        db.insertMessage("new", "user", "msg", createdAt = 2000L)
 
         val sessions = db.getSessions()
         assertEquals(2, sessions.size)
@@ -105,10 +107,11 @@ class ChatDatabaseTest {
     @Test
     fun `prune old sessions keeps latest N`() {
         db.createSession("s1")
-        Thread.sleep(10)
+        db.insertMessage("s1", "user", "msg", createdAt = 1000L)
         db.createSession("s2")
-        Thread.sleep(10)
+        db.insertMessage("s2", "user", "msg", createdAt = 2000L)
         db.createSession("s3")
+        db.insertMessage("s3", "user", "msg", createdAt = 3000L)
 
         db.pruneOldSessions(2)
 
@@ -141,13 +144,11 @@ class ChatDatabaseTest {
     }
 
     @Test
-    fun `messages ordered by created_at asc`() {
+    fun `messages ordered by created_at and id asc`() {
         db.createSession("s1")
-        db.insertMessage("s1", "user", "first")
-        Thread.sleep(5)
-        db.insertMessage("s1", "assistant", "second")
-        Thread.sleep(5)
-        db.insertMessage("s1", "user", "third")
+        db.insertMessage("s1", "user", "first", createdAt = 1000L)
+        db.insertMessage("s1", "assistant", "second", createdAt = 2000L)
+        db.insertMessage("s1", "user", "third", createdAt = 3000L)
 
         val messages = db.getMessages("s1")
         assertEquals("first", messages[0].content)
