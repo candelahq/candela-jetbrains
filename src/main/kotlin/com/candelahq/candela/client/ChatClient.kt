@@ -11,9 +11,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.future.await
-import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
+import java.io.IOException
 import java.io.InputStreamReader
 import java.net.URI
 import java.net.http.HttpClient
@@ -130,66 +130,79 @@ class ChatClient {
                 var doneReceived = false
                 var totalBytes = 0L
 
-                // Close the InputStream on cancellation to unblock readLine()
                 val inputStream = response.body()
-                currentCoroutineContext().job.invokeOnCompletion { inputStream.close() }
+                try {
+                    BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8)).use { reader ->
+                        var line = reader.readLine()
+                        @Suppress("LoopWithTooManyJumpStatements")
+                        while (line != null) {
+                            currentCoroutineContext().ensureActive()
 
-                BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8)).use { reader ->
-                    var line = reader.readLine()
-                    @Suppress("LoopWithTooManyJumpStatements")
-                    while (line != null) {
-                        currentCoroutineContext().ensureActive()
-
-                        if (line.isBlank()) {
-                            line = reader.readLine()
-                            continue
-                        }
-
-                        if (!line.startsWith("data: ") && !line.startsWith("data:")) {
-                            line = reader.readLine()
-                            continue
-                        }
-
-                        val data = line.removePrefix("data: ").removePrefix("data:").trim()
-                        log.debug("SSE data: ${data.take(200)}")
-
-                        if (data == "[DONE]") {
-                            doneReceived = true
-                            break
-                        }
-
-                        try {
-                            val chunk = gson.fromJson(data, ChatCompletionChunk::class.java)
-                            if (chunk != null) {
-                                if (chunk.usage != null) {
-                                    lastUsage = chunk.usage
-                                }
-
-                                val choice = chunk.choices?.firstOrNull()
-                                val content = choice?.delta?.content ?: ""
-
-                                if (content.isNotEmpty()) {
-                                    totalBytes += content.length
-                                    if (totalBytes > MAX_STREAM_BYTES) {
-                                        log.warn("Stream exceeded ${MAX_STREAM_BYTES / 1024}KB limit, aborting")
-                                        emit(
-                                            StreamEvent.Error(
-                                                RuntimeException("Response too large (>${MAX_STREAM_BYTES / 1024}KB) — aborting"),
-                                            ),
-                                        )
-                                        return@flow
-                                    }
-                                    emit(StreamEvent.Token(content))
-                                }
+                            if (line.isBlank()) {
+                                line = reader.readLine()
+                                continue
                             }
-                        } catch (
-                            @Suppress("TooGenericExceptionCaught")
-                            e: Exception,
-                        ) {
-                            log.warn("Malformed SSE chunk: ${data.take(200)}", e)
-                        }
 
-                        line = reader.readLine()
+                            if (!line.startsWith("data: ") && !line.startsWith("data:")) {
+                                line = reader.readLine()
+                                continue
+                            }
+
+                            val data = line.removePrefix("data: ").removePrefix("data:").trim()
+                            log.debug("SSE data: ${data.take(200)}")
+
+                            if (data == "[DONE]") {
+                                doneReceived = true
+                                break
+                            }
+
+                            try {
+                                val chunk = gson.fromJson(data, ChatCompletionChunk::class.java)
+                                if (chunk != null) {
+                                    if (chunk.usage != null) {
+                                        lastUsage = chunk.usage
+                                    }
+
+                                    val choice = chunk.choices?.firstOrNull()
+                                    val content = choice?.delta?.content ?: ""
+
+                                    if (content.isNotEmpty()) {
+                                        totalBytes += content.length
+                                        if (totalBytes > MAX_STREAM_BYTES) {
+                                            log.warn("Stream exceeded ${MAX_STREAM_BYTES / 1024}KB limit, aborting")
+                                            emit(
+                                                StreamEvent.Error(
+                                                    RuntimeException("Response too large (>${MAX_STREAM_BYTES / 1024}KB) — aborting"),
+                                                ),
+                                            )
+                                            return@flow
+                                        }
+                                        emit(StreamEvent.Token(content))
+                                    }
+                                }
+                            } catch (
+                                @Suppress("TooGenericExceptionCaught")
+                                e: Exception,
+                            ) {
+                                log.warn("Malformed SSE chunk: ${data.take(200)}", e)
+                            }
+
+                            line = reader.readLine()
+                        }
+                    }
+                } catch (_: IOException) {
+                    // Stream was closed (likely due to cancellation) — check if cancelled
+                    currentCoroutineContext().ensureActive()
+                    // If not cancelled, treat as unexpected EOF
+                    log.warn("Chat stream IOException (not cancellation)")
+                    emit(StreamEvent.Error(RuntimeException("Stream ended unexpectedly — response may be incomplete")))
+                    return@flow
+                } finally {
+                    // Always close the input stream to prevent resource leaks
+                    try {
+                        inputStream.close()
+                    } catch (_: IOException) {
+                        // Already closed
                     }
                 }
 
