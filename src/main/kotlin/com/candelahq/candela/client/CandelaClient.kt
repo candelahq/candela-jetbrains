@@ -8,7 +8,6 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.future.await
 import kotlinx.coroutines.withContext
 import java.net.URI
-import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
@@ -27,11 +26,7 @@ class CandelaClient(
     private val cacheTtlMs: Long = 0,
 ) {
     private val baseUrl = baseUrl.trimEnd('/')
-    private val http =
-        HttpClient
-            .newBuilder()
-            .connectTimeout(Duration.ofSeconds(2))
-            .build()
+    private val http = SharedHttpClient.instance
     private val gson = Gson()
 
     @Volatile
