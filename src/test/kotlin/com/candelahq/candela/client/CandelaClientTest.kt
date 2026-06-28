@@ -1,8 +1,12 @@
 package com.candelahq.candela.client
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -397,5 +401,188 @@ class CandelaClientTest {
             assertTrue(data!!.budget!!.isNearLimit)
             assertTrue(data.budget!!.isExhausted, "100% spent should be exhausted")
             assertEquals(0.0, data.budget!!.remainingUsd, 0.001)
+        }
+
+    // ── Cancellation ──────────────────────────────────────────────────────
+
+    @Test
+    fun `isAlive rethrows CancellationException`() =
+        runTest {
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setBody("OK")
+                    .setBodyDelay(5, TimeUnit.SECONDS),
+            )
+            val client = CandelaClient(baseUrl)
+
+            var caughtCE = false
+            val job =
+                launch {
+                    try {
+                        client.isAlive()
+                    } catch (_: CancellationException) {
+                        caughtCE = true
+                        throw CancellationException("re-propagate")
+                    }
+                }
+
+            delay(50) // Let the coroutine start and enter the HTTP call
+            job.cancel()
+            job.join()
+
+            assertTrue(job.isCancelled, "Job should be cancelled — CE must not be swallowed")
+        }
+
+    @Test
+    fun `getDashboardData rethrows CancellationException`() =
+        runTest {
+            // Health check succeeds immediately
+            server.enqueue(MockResponse().setResponseCode(200).setBody("OK"))
+            // Consolidated RPC is slow — will be cancelled
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody("""{"summary": {"total_input_tokens": 1, "total_output_tokens": 1}}""")
+                    .setBodyDelay(5, TimeUnit.SECONDS),
+            )
+
+            val client = CandelaClient(baseUrl)
+
+            var caughtCE = false
+            val job =
+                launch {
+                    try {
+                        client.getDashboardData()
+                    } catch (_: CancellationException) {
+                        caughtCE = true
+                        throw CancellationException("re-propagate")
+                    }
+                }
+
+            delay(50) // Let health check complete and RPC begin
+            job.cancel()
+            job.join()
+
+            assertTrue(job.isCancelled, "Job should be cancelled — CE must not be swallowed")
+        }
+
+    // ── Legacy Fanout ─────────────────────────────────────────────────────
+
+    @Test
+    fun `legacyFanout uses non-blocking sendAsync`() =
+        runTest {
+            server.dispatcher =
+                object : okhttp3.mockwebserver.Dispatcher() {
+                    private var dashboardCalled = false
+
+                    override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
+                        val path = request.path ?: ""
+                        return when {
+                            path.contains("/healthz") ->
+                                MockResponse().setResponseCode(200)
+                            path.contains("GetDashboardData") && !dashboardCalled -> {
+                                dashboardCalled = true
+                                MockResponse().setResponseCode(404)
+                            }
+                            path.contains("GetUsageSummary") ->
+                                MockResponse()
+                                    .setResponseCode(200)
+                                    .setBody(
+                                        """{"total_input_tokens": 200, "total_output_tokens": 100, "total_cost_usd": 0.15, "total_llm_calls": 5}""",
+                                    )
+                            path.contains("GetMyBudget") ->
+                                MockResponse()
+                                    .setResponseCode(200)
+                                    .setBody(
+                                        """{"budget": {"limit_usd": 20.0, "spent_usd": 8.0}, "total_remaining_usd": 12.0, "active_grants": [{"id": "g1", "amount_usd": 5.0, "spent_usd": 2.0, "reason": "trial"}]}""",
+                                    )
+                            else ->
+                                MockResponse().setResponseCode(404)
+                        }
+                    }
+                }
+
+            val client = CandelaClient(baseUrl)
+            val data = client.getDashboardData()
+
+            assertNotNull(data)
+            assertEquals(300, data.usage.totalTokens)
+            assertEquals(200, data.usage.inputTokens)
+            assertEquals(100, data.usage.outputTokens)
+            assertEquals(0.15, data.usage.totalCostUsd, 0.001)
+            assertEquals(5, data.usage.requestCount)
+
+            assertNotNull(data.budget)
+            assertEquals(20.0, data.budget!!.limitUsd, 0.001)
+            assertEquals(8.0, data.budget!!.spentUsd, 0.001)
+            assertEquals(12.0, data.budget!!.remainingUsd, 0.001)
+            assertFalse(data.budget!!.isNearLimit)
+            assertFalse(data.budget!!.isExhausted)
+
+            assertEquals(1, data.activeGrants.size)
+            assertEquals("g1", data.activeGrants[0].id)
+            assertEquals(5.0, data.activeGrants[0].amountUsd, 0.001)
+            assertEquals(3.0, data.activeGrants[0].remainingUsd, 0.001)
+        }
+
+    // ── Error Handling ────────────────────────────────────────────────────
+
+    @Test
+    fun `getDashboardData returns null when consolidated and legacy both fail with exceptions`() =
+        runTest {
+            // Health check succeeds
+            server.enqueue(MockResponse().setResponseCode(200).setBody("OK"))
+
+            // Shut down the server after the health check is consumed,
+            // so all subsequent HTTP calls fail with connection errors.
+            val client = CandelaClient(baseUrl)
+            assertTrue(client.isAlive())
+            server.shutdown()
+
+            // Both tryGetDashboardData and legacyFanout will hit connection errors → null
+            assertNull(client.getDashboardData())
+        }
+
+    // ── Caching ───────────────────────────────────────────────────────────
+
+    @Test
+    fun `cache survives across multiple getDashboardData calls`() =
+        runTest {
+            // Health check
+            server.enqueue(MockResponse().setResponseCode(200))
+            // Dashboard data (first call)
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "application/json")
+                    .setBody(
+                        """{"summary": {"total_input_tokens": 500, "total_output_tokens": 250, "total_cost_usd": 0.3, "total_llm_calls": 7}}""",
+                    ),
+            )
+
+            val client = CandelaClient(baseUrl, cacheTtlMs = 60_000)
+
+            val data1 = client.getDashboardData()
+            assertNotNull(data1)
+            assertEquals(750, data1.usage.totalTokens)
+
+            // 1 health + 1 consolidated = 2 requests
+            assertEquals(2, server.requestCount, "First call should make 2 requests")
+
+            val data2 = client.getDashboardData()
+            assertNotNull(data2)
+            assertEquals(750, data2.usage.totalTokens)
+
+            // Still 2 — second call was fully cached (health is also cached positive)
+            assertEquals(2, server.requestCount, "Second call should be entirely cached")
+
+            val data3 = client.getDashboardData()
+            assertNotNull(data3)
+            assertEquals(data1.usage.totalCostUsd, data3.usage.totalCostUsd, 0.001)
+
+            // Still 2 — third call also cached
+            assertEquals(2, server.requestCount, "Third call should still be cached")
         }
 }
