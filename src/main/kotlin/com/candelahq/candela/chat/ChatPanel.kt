@@ -4,6 +4,8 @@ import com.candelahq.candela.CandelaCoroutineService
 import com.candelahq.candela.client.ChatClient
 import com.candelahq.candela.client.ChunkUsage
 import com.candelahq.candela.client.StreamEvent
+import com.candelahq.candela.client.estimatedCostUsd
+import com.candelahq.candela.client.formatCostUsd
 import com.candelahq.candela.settings.CandleSettings
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.command.WriteCommandAction
@@ -320,7 +322,7 @@ class ChatPanel(
                                             updateStreamingBubble(finalContent)
                                             addCodeBlockActions(finalContent)
                                             if (event.usage != null) {
-                                                addTokenInfo(event.usage)
+                                                addTokenInfo(event.usage, model)
                                             }
                                             sendButton.text = "Send"
                                             streamingTextPane = null
@@ -558,8 +560,13 @@ class ChatPanel(
         messagesPanel.revalidate()
     }
 
-    private fun addTokenInfo(usage: ChunkUsage) {
-        val info = "Tokens: ${usage.promptTokens} in / ${usage.completionTokens} out / ${usage.totalTokens} total"
+    private fun addTokenInfo(
+        usage: ChunkUsage,
+        model: String,
+    ) {
+        val cost = usage.estimatedCostUsd(model)
+        val costSuffix = if (cost != null && cost > 0.0) " · ~${formatCostUsd(cost)}" else ""
+        val info = "\u26A1 ${usage.totalTokens} tokens (${usage.promptTokens} in / ${usage.completionTokens} out)$costSuffix"
         val label =
             JLabel(info).apply {
                 font = font.deriveFont(10f)

@@ -2,6 +2,7 @@ package com.candelahq.candela.client
 
 import com.google.gson.annotations.SerializedName
 import java.time.Instant
+import java.util.Locale
 
 /** Aggregated usage for a time range. */
 data class UsageSummary(
@@ -116,3 +117,88 @@ data class ChunkUsage(
     @SerializedName("total_tokens")
     val totalTokens: Int = 0,
 )
+
+/**
+ * Per-token pricing in USD (input, output) per 1M tokens.
+ *
+ * Covers popular models exposed through Candela's proxy. Returns `null`
+ * for unknown models so the UI can gracefully omit cost display.
+ */
+data class TokenPricing(
+    val inputPerMillion: Double,
+    val outputPerMillion: Double,
+)
+
+/**
+ * Estimate the USD cost of this usage chunk based on model pricing.
+ *
+ * @return estimated cost in USD, or `null` if the model isn't in the pricing table
+ */
+fun ChunkUsage.estimatedCostUsd(model: String): Double? {
+    val pricing =
+        MODEL_PRICING.entries
+            .firstOrNull { (pattern, _) ->
+                model.lowercase(Locale.ROOT).contains(pattern)
+            }?.value ?: return null
+
+    return (promptTokens * pricing.inputPerMillion + completionTokens * pricing.outputPerMillion) / 1_000_000.0
+}
+
+/**
+ * Format a USD cost for display.
+ *
+ * - Costs ≥ $0.01 → "$0.03"
+ * - Costs < $0.01 → "$0.003" (3 decimal places)
+ * - Costs < $0.001 → "<$0.001"
+ */
+fun formatCostUsd(cost: Double): String =
+    when {
+        cost < 0.001 -> "<\$0.001"
+        cost < 0.01 -> "\$%.3f".format(Locale.US, cost)
+        else -> "\$%.2f".format(Locale.US, cost)
+    }
+
+/**
+ * Pricing table keyed by model ID substring (lowercase).
+ * Ordered most-specific first to avoid prefix collisions.
+ */
+private val MODEL_PRICING =
+    linkedMapOf(
+        // GPT-4o family
+        "gpt-4o-mini" to TokenPricing(0.15, 0.60),
+        "gpt-4o" to TokenPricing(2.50, 10.00),
+        "gpt-4-turbo" to TokenPricing(10.00, 30.00),
+        "gpt-4" to TokenPricing(30.00, 60.00),
+        // GPT-3.5
+        "gpt-3.5-turbo" to TokenPricing(0.50, 1.50),
+        // Claude 4
+        "claude-4-opus" to TokenPricing(15.00, 75.00),
+        "claude-4-sonnet" to TokenPricing(3.00, 15.00),
+        // Claude 3.5
+        "claude-3.5-sonnet" to TokenPricing(3.00, 15.00),
+        "claude-3.5-haiku" to TokenPricing(0.80, 4.00),
+        // Claude 3
+        "claude-3-opus" to TokenPricing(15.00, 75.00),
+        "claude-3-sonnet" to TokenPricing(3.00, 15.00),
+        "claude-3-haiku" to TokenPricing(0.25, 1.25),
+        // Gemini
+        "gemini-2.5-pro" to TokenPricing(1.25, 10.00),
+        "gemini-2.5-flash" to TokenPricing(0.15, 0.60),
+        "gemini-2.0-flash" to TokenPricing(0.10, 0.40),
+        "gemini-1.5-pro" to TokenPricing(1.25, 5.00),
+        "gemini-1.5-flash" to TokenPricing(0.075, 0.30),
+        // DeepSeek
+        "deepseek-r1" to TokenPricing(0.55, 2.19),
+        "deepseek-v3" to TokenPricing(0.27, 1.10),
+        "deepseek-chat" to TokenPricing(0.27, 1.10),
+        // Llama (local / cheap)
+        "llama" to TokenPricing(0.0, 0.0),
+        // Mistral
+        "mistral-large" to TokenPricing(2.00, 6.00),
+        "mistral-small" to TokenPricing(0.20, 0.60),
+        "mistral" to TokenPricing(0.25, 0.25),
+        // Codestral
+        "codestral" to TokenPricing(0.30, 0.90),
+        // Qwen (local / cheap)
+        "qwen" to TokenPricing(0.0, 0.0),
+    )
