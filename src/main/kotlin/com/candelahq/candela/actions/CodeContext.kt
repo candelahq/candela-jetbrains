@@ -2,6 +2,7 @@ package com.candelahq.candela.actions
 
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
+import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiNamedElement
 import com.intellij.psi.util.PsiTreeUtil
 
@@ -48,11 +49,13 @@ fun extractCodeContext(e: AnActionEvent): CodeContext? {
     val lang = psiFile?.language?.id?.lowercase() ?: virtualFile.extension ?: ""
     val fileName = psiFile?.name ?: virtualFile.name
 
-    // Extract import/package declarations from the file header (language-agnostic)
-    val fileText = editor.document.text
+    // Extract import/package declarations from the file header (language-agnostic).
+    // Use immutableCharSequence to avoid copying the entire document, and limit to
+    // the first 100 lines where imports/packages are typically located.
     val importLines =
-        fileText
-            .lines()
+        editor.document.immutableCharSequence
+            .lineSequence()
+            .take(100)
             .filter { line ->
                 val trimmed = line.trimStart()
                 trimmed.startsWith("import ") ||
@@ -66,6 +69,8 @@ fun extractCodeContext(e: AnActionEvent): CodeContext? {
     var enclosingClass: String? = null
     var enclosingFunction: String? = null
     if (psiFile != null && editor.selectionModel.hasSelection()) {
+        // Ensure PSI tree is in sync with the editor document
+        PsiDocumentManager.getInstance(project).commitDocument(editor.document)
         val element = psiFile.findElementAt(editor.selectionModel.selectionStart)
         if (element != null) {
             // Walk up PSI tree collecting named parents
@@ -93,9 +98,14 @@ fun extractCodeContext(e: AnActionEvent): CodeContext? {
     // Line range of selection
     val lineRange =
         if (editor.selectionModel.hasSelection()) {
+            val startOffset = editor.selectionModel.selectionStart
+            val endOffset = editor.selectionModel.selectionEnd
+            // When selecting whole lines, selectionEnd is at the start of the
+            // next line. Decrement by 1 to avoid including that extra line.
+            val adjustedEnd = if (endOffset > startOffset) endOffset - 1 else endOffset
             Pair(
-                editor.document.getLineNumber(editor.selectionModel.selectionStart) + 1,
-                editor.document.getLineNumber(editor.selectionModel.selectionEnd) + 1,
+                editor.document.getLineNumber(startOffset) + 1,
+                editor.document.getLineNumber(adjustedEnd) + 1,
             )
         } else {
             null

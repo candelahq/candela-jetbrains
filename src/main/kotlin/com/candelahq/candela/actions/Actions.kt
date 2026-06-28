@@ -13,6 +13,7 @@ import com.intellij.openapi.components.service
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.wm.WindowManager
 import com.intellij.platform.ide.progress.withBackgroundProgress
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -29,14 +30,22 @@ private fun fetchAndShowDashboard(e: AnActionEvent) {
     val settings = CandleSettings.getInstance().state
     val client = CandelaClient(settings.serverUrl)
     project.service<CandelaCoroutineService>().scope.launch {
-        withBackgroundProgress(project, "Fetching cost summary\u2026") {
-            val data = client.getDashboardData()
-            withContext(Dispatchers.Main) {
-                if (data != null) {
-                    CandleNotifications.showCostSummary(project, data)
-                } else {
-                    CandleNotifications.showOffline(project)
+        try {
+            withBackgroundProgress(project, "Fetching cost summary\u2026") {
+                val data = client.getDashboardData()
+                withContext(Dispatchers.Main) {
+                    if (data != null) {
+                        CandleNotifications.showCostSummary(project, data)
+                    } else {
+                        CandleNotifications.showOffline(project)
+                    }
                 }
+            }
+        } catch (_: CancellationException) {
+            throw CancellationException()
+        } catch (_: Exception) {
+            withContext(Dispatchers.Main) {
+                CandleNotifications.showOffline(project)
             }
         }
     }

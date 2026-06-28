@@ -368,26 +368,34 @@ class ChatPanel(
         modelSelector.removeAllItems()
         modelSelector.addItem("(loading…)")
         scope.launch {
-            withBackgroundProgress(project, "Loading models…") {
-                val settings = CandleSettings.getInstance().state
-                val models = chatClient.fetchModels(settings.chatServerUrl)
-                // Back on Dispatchers.Main after fetchModels() suspends — safe for Swing
-                if (disposed) return@withBackgroundProgress
-                modelSelector.removeAllItems()
-                for (model in models) {
-                    modelSelector.addItem(model.id)
-                }
-                // Restore persisted selection
-                val defaultModel = settings.defaultModel
-                if (defaultModel.isNotEmpty()) {
-                    for (i in 0 until modelSelector.itemCount) {
-                        if (modelSelector.getItemAt(i) == defaultModel) {
-                            modelSelector.selectedIndex = i
-                            break
+            try {
+                withBackgroundProgress(project, "Loading models…") {
+                    val settings = CandleSettings.getInstance().state
+                    val models = chatClient.fetchModels(settings.chatServerUrl)
+                    if (disposed) return@withBackgroundProgress
+                    modelSelector.removeAllItems()
+                    for (model in models) {
+                        modelSelector.addItem(model.id)
+                    }
+                    val defaultModel = settings.defaultModel
+                    if (defaultModel.isNotEmpty()) {
+                        for (i in 0 until modelSelector.itemCount) {
+                            if (modelSelector.getItemAt(i) == defaultModel) {
+                                modelSelector.selectedIndex = i
+                                break
+                            }
                         }
                     }
+                    if (models.isEmpty()) {
+                        modelSelector.addItem("(no models — check connection)")
+                    }
                 }
-                if (models.isEmpty()) {
+            } catch (_: CancellationException) {
+                throw CancellationException()
+            } catch (ex: Exception) {
+                log.warn("Failed to load models", ex)
+                if (!disposed) {
+                    modelSelector.removeAllItems()
                     modelSelector.addItem("(no models — check connection)")
                 }
             }
