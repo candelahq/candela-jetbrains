@@ -1,5 +1,6 @@
 package com.candelahq.candela
 
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -76,32 +77,35 @@ class CoroutineScopeLifecycleTest {
     @Test
     fun `SupervisorJob prevents sibling cancellation on failure`() =
         runTest {
-            val parentScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+            // CoroutineExceptionHandler is required to consume the uncaught exception
+            // from the failing child — without it, the exception would propagate.
+            val handler =
+                CoroutineExceptionHandler { _, _ ->
+                    // swallow — child failures are expected in this test
+                }
+            val parentScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + handler)
 
-            var sibling1Cancelled = false
+            var sibling1Failed = false
             var sibling2Completed = false
 
             val job1 =
                 parentScope.launch {
-                    try {
-                        delay(Long.MAX_VALUE) // wait forever
-                    } finally {
-                        sibling1Cancelled = true
-                    }
+                    sibling1Failed = true
+                    throw RuntimeException("child failure")
                 }
 
             val job2 =
                 parentScope.launch {
-                    delay(50)
+                    delay(100)
                     sibling2Completed = true
                 }
 
-            // Cancel job1 — should NOT affect job2
-            job1.cancel()
+            // Wait for both to finish
+            job1.join()
             job2.join()
 
-            assertTrue(sibling1Cancelled, "Job1 should have been cancelled")
-            assertTrue(sibling2Completed, "Job2 should complete independently")
+            assertTrue(sibling1Failed, "Job1 should have run and failed")
+            assertTrue(sibling2Completed, "Job2 should complete independently despite sibling failure")
             assertTrue(parentScope.isActive, "Parent scope should still be active")
         }
 

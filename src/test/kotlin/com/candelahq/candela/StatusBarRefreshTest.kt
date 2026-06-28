@@ -4,7 +4,6 @@ import com.candelahq.candela.client.CandelaClient
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
-import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -111,31 +110,18 @@ class StatusBarRefreshTest {
         }
 
     @Test
-    fun `backoff contract - timeout returns null not throws`() =
+    fun `backoff contract - stalled server returns null not throws`() =
         runTest {
             // Health check passes
             server.enqueue(MockResponse().setResponseCode(200))
-            // Dashboard takes too long
+            // Dashboard request gets no response at all — triggers read timeout
             server.enqueue(
                 MockResponse()
-                    .setResponseCode(200)
-                    .setHeader("Content-Type", "application/json")
-                    .setBody(DASHBOARD_RESPONSE_JSON)
-                    .setBodyDelay(30, TimeUnit.SECONDS),
+                    .setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.NO_RESPONSE),
             )
 
-            // With a short timeout, this should return null
-            val shortTimeoutClient =
-                CandelaClient(
-                    server.url("/").toString().trimEnd('/'),
-                )
-            // The client has internal timeouts; this should eventually return null
-            // (or the test framework will timeout if it doesn't)
-            val data = shortTimeoutClient.getDashboardData()
-            // Note: This test may pass with data if the mock delay isn't long enough
-            // relative to the client's actual timeout. The key assertion is that
-            // it doesn't throw — either null or data is acceptable.
-            assertTrue(true, "getDashboardData should not throw on timeout")
+            val data = client.getDashboardData()
+            assertTrue(data == null, "Should return null on stalled server, not throw")
         }
 
     // ── Formatting ────────────────────────────────────────────────────────

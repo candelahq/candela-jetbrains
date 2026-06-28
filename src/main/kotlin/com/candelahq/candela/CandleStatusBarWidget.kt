@@ -162,6 +162,7 @@ class CandleStatusBarWidget(
                     }
                     true
                 } else {
+                    lastData = null
                     currentText = "🕯️ offline"
                     currentTooltip = "Candela is not running"
                     log.info("Candela status: offline")
@@ -171,6 +172,7 @@ class CandleStatusBarWidget(
                 throw e
             } catch (e: Exception) {
                 log.warn("Status bar refresh failed", e)
+                lastData = null
                 currentText = "🕯️ offline"
                 currentTooltip = "Candela is not running"
                 false
