@@ -75,5 +75,15 @@
                     text="Generate Tests"
                     description="Generate tests for selected code with Candela"/>
         </group>
+
+        <!-- Focus chat window shortcut: ⌘⇧L (macOS) / Ctrl+Shift+L (Win/Linux) -->
+        <action id="Candela.FocusChatToolWindow"
+                class="com.candelahq.candela.actions.FocusChatToolWindowAction"
+                text="Focus Candela Chat"
+                description="Open and focus the Candela Chat tool window">
+            <keyboard-shortcut keymap="$default" first-keystroke="control shift L"/>
+            <keyboard-shortcut keymap="Mac OS X" first-keystroke="meta shift L"/>
+            <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta shift L"/>
+        </action>
     </actions>
 </idea-plugin>
