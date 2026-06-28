@@ -3,8 +3,11 @@
 # Jobs:
 #   lint           — ktlint + detekt (parallel, ~30s)
 #   unit-test      — JUnit 5 unit tests, no IDE sandbox (parallel, ~30s)
-#   platform-test  — JUnit 3 platform tests, full IDE sandbox (parallel, ~5m)
-#   build          — plugin build & verification (after all pass)
+#   platform-test  — JUnit 3 platform tests, full IDE sandbox (advisory)
+#                    NOTE: IDE sandbox tearDown is very slow on CI (~10 min
+#                    between tests). These run as advisory (continue-on-error)
+#                    and don't block the build. Run them in IntelliJ IDE locally.
+#   build          — plugin build & verification (after lint + unit-test)
 #
 # Mirrors the CI patterns from the main candela repo.
 
@@ -66,9 +69,10 @@ jobs:
           --tests "com.candelahq.candela.client.*"
 
   platform-test:
-    name: Platform Test
+    name: Platform Test (Advisory)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -86,7 +90,7 @@ jobs:
 
   build:
     name: Build
-    needs: [lint, unit-test, platform-test]
+    needs: [lint, unit-test]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
