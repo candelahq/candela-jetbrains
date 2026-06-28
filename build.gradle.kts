@@ -18,13 +18,14 @@ repositories {
 
 dependencies {
     intellijPlatform {
-        intellijIdeaCommunity("2024.3")
+        intellijIdeaCommunity("2025.1")
         pluginVerifier()
     }
 
     implementation("com.google.code.gson:gson:2.13.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.10.2")
+    // Coroutines are bundled by IntelliJ 2025.1+ — compileOnly avoids classloader clashes
+    compileOnly("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    compileOnly("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.10.2")
 
     testImplementation(kotlin("test"))
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
@@ -71,7 +72,7 @@ intellijPlatform {
             email = "austin@apache.org"
         }
         ideaVersion {
-            sinceBuild = "243"
+            sinceBuild = "251"
             untilBuild = provider { null }
         }
         changeNotes =

@@ -3,6 +3,7 @@ package com.candelahq.candela
 import com.candelahq.candela.client.CandelaClient
 import com.candelahq.candela.client.DashboardData
 import com.candelahq.candela.settings.CandleSettings
+import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.StatusBar
@@ -54,8 +55,19 @@ class CandleStatusBarWidget(
     @Volatile
     private var lastData: DashboardData? = null
 
-    /** Coroutine scope for this widget — cancelled in [dispose]. */
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /**
+     * Coroutine scope — child of the project-level scope, cancelled in [dispose].
+     * Inherits full parent context (modality, tracing) and adds a [SupervisorJob]
+     * so individual refresh failures don't cancel the scope.
+     */
+    private val scope =
+        project.service<CandelaCoroutineService>().scope.let { parentScope ->
+            CoroutineScope(
+                parentScope.coroutineContext +
+                    SupervisorJob(parentScope.coroutineContext[Job]) +
+                    Dispatchers.Default,
+            )
+        }
 
     private var refreshJob: Job? = null
     private var client: CandelaClient? = null
@@ -101,23 +113,27 @@ class CandleStatusBarWidget(
         startRefreshLoop(CandleSettings.getInstance().state.autoRefreshIntervalSeconds)
     }
 
-    private fun startRefreshLoop(intervalSeconds: Int) {
+    internal fun startRefreshLoop(intervalSeconds: Int) {
         refreshJob?.cancel()
         if (intervalSeconds <= 0) return
         refreshJob =
             scope.launch {
-                // Immediate first fetch
-                refresh()
-                // Then loop at the configured interval
                 while (true) {
-                    delay(intervalSeconds * 1000L)
-                    refresh()
+                    val success = refresh()
+                    delay(if (success) intervalSeconds * 1000L else OFFLINE_BACKOFF_MS)
                 }
             }
     }
 
+    /**
+     * Fetch dashboard data, update widget text, and return success/failure.
+     *
+     * Returns `true` if data was fetched successfully, `false` if the server
+     * is offline or an error occurred. The caller uses this to decide whether
+     * to apply the normal refresh interval or the offline backoff delay.
+     */
     @Suppress("TooGenericExceptionCaught")
-    private suspend fun refresh() {
+    internal suspend fun refresh(): Boolean {
         val settings = CandleSettings.getInstance().state
         val serverUrl = settings.serverUrl
         if (serverUrl != activeServerUrl) {
@@ -125,40 +141,50 @@ class CandleStatusBarWidget(
             client = CandelaClient(serverUrl, cacheTtlMs = 30_000)
         }
 
-        try {
-            val data = client?.getDashboardData()
-            if (data == null) {
-                currentText = "🕯️ offline"
-                currentTooltip = "Candela is not running"
-                log.info("Candela status: offline")
-                // Back off when offline
-                delay(OFFLINE_BACKOFF_MS)
-            } else {
-                lastData = data
-                currentText = formatStatusText(data)
-                currentTooltip = formatTooltip(data)
+        val success =
+            try {
+                val data = client?.getDashboardData()
+                if (data != null) {
+                    lastData = data
+                    currentText = formatStatusText(data)
+                    currentTooltip = formatTooltip(data)
 
-                // Check for budget warning (with cooldown to prevent notification spam)
-                val threshold = settings.budgetWarningThreshold
-                data.budget?.let { budget ->
-                    val now = System.currentTimeMillis()
-                    if (budget.percentUsed >= threshold && (now - lastBudgetWarningMs) > BUDGET_WARNING_COOLDOWN_MS) {
-                        lastBudgetWarningMs = now
-                        withContext(Dispatchers.Main) {
-                            CandleNotifications.showBudgetWarning(project, budget)
+                    // Check for budget warning (with cooldown to prevent notification spam)
+                    val threshold = settings.budgetWarningThreshold
+                    data.budget?.let { budget ->
+                        val now = System.currentTimeMillis()
+                        if (budget.percentUsed >= threshold && (now - lastBudgetWarningMs) > BUDGET_WARNING_COOLDOWN_MS) {
+                            lastBudgetWarningMs = now
+                            withContext(Dispatchers.Main) {
+                                CandleNotifications.showBudgetWarning(project, budget)
+                            }
                         }
                     }
+                    true
+                } else {
+                    lastData = null
+                    currentText = "🕯️ offline"
+                    currentTooltip = "Candela is not running"
+                    log.info("Candela status: offline")
+                    false
                 }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                log.warn("Status bar refresh failed", e)
+                lastData = null
+                currentText = "🕯️ offline"
+                currentTooltip = "Candela is not running"
+                false
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            log.warn("Status bar refresh failed", e)
-            currentText = "🕯️ offline"
-            currentTooltip = "Candela is not running"
-        }
 
-        // Update the status bar widget on EDT (protected to not crash the loop)
+        // Update the status bar widget on EDT
+        updateWidgetOnEdt()
+        return success
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun updateWidgetOnEdt() {
         try {
             withContext(Dispatchers.Main) {
                 statusBar?.updateWidget(ID)
