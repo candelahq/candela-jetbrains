@@ -11,7 +11,8 @@ import com.intellij.openapi.wm.ToolWindowManager
 /**
  * Editor context action: "Explain Code"
  *
- * Sends the selected code to Candela Chat with an "Explain this code" prompt.
+ * Sends the selected code to Candela Chat with an "Explain this code" prompt,
+ * enriched with file context (path, imports, enclosing class/function).
  */
 class ExplainCodeAction :
     AnAction(),
@@ -23,11 +24,12 @@ class ExplainCodeAction :
         val editor = e.getData(CommonDataKeys.EDITOR) ?: return
         val selectedText = editor.selectionModel.selectedText ?: return
 
-        val psiFile = e.getData(CommonDataKeys.PSI_FILE)
-        val lang = psiFile?.language?.id?.lowercase() ?: e.getData(CommonDataKeys.VIRTUAL_FILE)?.extension ?: ""
-        val fileName = psiFile?.name ?: e.getData(CommonDataKeys.VIRTUAL_FILE)?.name ?: "unknown"
+        val ctx = extractCodeContext(e)
+        val lang = ctx?.language ?: e.getData(CommonDataKeys.VIRTUAL_FILE)?.extension ?: ""
+        val fileName = ctx?.fileName ?: e.getData(CommonDataKeys.VIRTUAL_FILE)?.name ?: "unknown"
 
-        val message = "Explain this code from `$fileName`:\n\n${buildCodeFence(selectedText, lang)}"
+        val contextHeader = ctx?.let { "\n${formatContextHeader(it)}\n\n" } ?: "\n\n"
+        val message = "Explain this code from `$fileName`:$contextHeader${buildCodeFence(selectedText, lang)}"
 
         val toolWindow =
             ToolWindowManager

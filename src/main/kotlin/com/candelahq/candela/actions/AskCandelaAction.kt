@@ -13,7 +13,8 @@ import com.intellij.openapi.wm.ToolWindowManager
  * Editor context action: "Ask Candela..."
  *
  * Prompts the user for a question about the selected code,
- * then opens the Candela Chat tool window and sends the query.
+ * then opens the Candela Chat tool window and sends the query
+ * enriched with file context (path, imports, enclosing class/function).
  */
 class AskCandelaAction :
     AnAction(),
@@ -35,11 +36,13 @@ class AskCandelaAction :
 
         if (question.isBlank()) return
 
-        val psiFile = e.getData(CommonDataKeys.PSI_FILE)
-        val lang = psiFile?.language?.id?.lowercase() ?: e.getData(CommonDataKeys.VIRTUAL_FILE)?.extension ?: ""
-        val fileName = psiFile?.name ?: e.getData(CommonDataKeys.VIRTUAL_FILE)?.name ?: "unknown"
+        val ctx = extractCodeContext(e)
+        val lang = ctx?.language ?: e.getData(CommonDataKeys.VIRTUAL_FILE)?.extension ?: ""
+        val fileName = ctx?.fileName ?: e.getData(CommonDataKeys.VIRTUAL_FILE)?.name ?: "unknown"
 
-        val message = "Question about this code from `$fileName`:\n\n${buildCodeFence(selectedText, lang)}\n\n$question"
+        val contextHeader = ctx?.let { "\n${formatContextHeader(it)}\n\n" } ?: "\n\n"
+        val message =
+            "Question about this code from `$fileName`:$contextHeader${buildCodeFence(selectedText, lang)}\n\n$question"
 
         // Open the tool window and send
         val toolWindow =

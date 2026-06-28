@@ -11,6 +11,7 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.project.Project
+import com.intellij.platform.ide.progress.withBackgroundProgress
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
@@ -123,6 +124,9 @@ class ChatPanel(
 
     @Volatile
     private var disposed = false
+
+    /** Inline "Thinking…" label shown in the chat while waiting for first token. */
+    private var thinkingLabel: JPanel? = null
 
     init {
         buildUI()
@@ -257,6 +261,12 @@ class ChatPanel(
         val assistantPane = addAssistantBubble("")
         streamingTextPane = assistantPane
 
+        // Show inline "Thinking…" indicator until first token arrives
+        thinkingLabel = addThinkingIndicator()
+        val firstTokenReceived =
+            java.util.concurrent.atomic
+                .AtomicBoolean(false)
+
         val settings = CandleSettings.getInstance().state
         val baseUrl = settings.chatServerUrl
         val messages = session.buildRequestMessages()
@@ -278,6 +288,12 @@ class ChatPanel(
                         maxTokens = maxTokens,
                         onToken = { token ->
                             streamingContent.append(token)
+                            // Remove thinking indicator on first token
+                            if (firstTokenReceived.compareAndSet(false, true)) {
+                                SwingUtilities.invokeLater {
+                                    removeThinkingIndicator()
+                                }
+                            }
                             // Throttle UI updates: render at most every STREAM_THROTTLE_MS
                             val now = System.currentTimeMillis()
                             if (now - lastUiUpdateMs.get() >= STREAM_THROTTLE_MS) {
@@ -295,6 +311,7 @@ class ChatPanel(
                             session.addAssistantMessage(finalContent)
                             SwingUtilities.invokeLater {
                                 if (!disposed && streamGeneration.get() == thisGeneration) {
+                                    removeThinkingIndicator()
                                     updateStreamingBubble(finalContent)
                                     addCodeBlockActions(finalContent)
                                     if (usage != null) {
@@ -309,6 +326,7 @@ class ChatPanel(
                             log.warn("Chat stream error", error)
                             SwingUtilities.invokeLater {
                                 if (!disposed && streamGeneration.get() == thisGeneration) {
+                                    removeThinkingIndicator()
                                     addErrorMessage("Error: ${error.message ?: "Unknown error"}")
                                     sendButton.text = "Send"
                                     streamingTextPane = null
@@ -320,6 +338,7 @@ class ChatPanel(
                     // Stream was cancelled by user — update UI
                     SwingUtilities.invokeLater {
                         if (!disposed && streamGeneration.get() == thisGeneration) {
+                            removeThinkingIndicator()
                             val partial = streamingContent.toString()
                             if (partial.isNotEmpty()) {
                                 updateStreamingBubble(partial)
@@ -346,29 +365,64 @@ class ChatPanel(
     }
 
     private fun loadModels() {
+        modelSelector.removeAllItems()
+        modelSelector.addItem("(loading…)")
         scope.launch {
-            val settings = CandleSettings.getInstance().state
-            val models = chatClient.fetchModels(settings.chatServerUrl)
-            // Back on Dispatchers.Main after fetchModels() suspends — safe for Swing
-            if (disposed) return@launch
-            modelSelector.removeAllItems()
-            for (model in models) {
-                modelSelector.addItem(model.id)
-            }
-            // Restore persisted selection
-            val defaultModel = settings.defaultModel
-            if (defaultModel.isNotEmpty()) {
-                for (i in 0 until modelSelector.itemCount) {
-                    if (modelSelector.getItemAt(i) == defaultModel) {
-                        modelSelector.selectedIndex = i
-                        break
+            withBackgroundProgress(project, "Loading models…") {
+                val settings = CandleSettings.getInstance().state
+                val models = chatClient.fetchModels(settings.chatServerUrl)
+                // Back on Dispatchers.Main after fetchModels() suspends — safe for Swing
+                if (disposed) return@withBackgroundProgress
+                modelSelector.removeAllItems()
+                for (model in models) {
+                    modelSelector.addItem(model.id)
+                }
+                // Restore persisted selection
+                val defaultModel = settings.defaultModel
+                if (defaultModel.isNotEmpty()) {
+                    for (i in 0 until modelSelector.itemCount) {
+                        if (modelSelector.getItemAt(i) == defaultModel) {
+                            modelSelector.selectedIndex = i
+                            break
+                        }
                     }
                 }
-            }
-            if (models.isEmpty()) {
-                modelSelector.addItem("(no models — check connection)")
+                if (models.isEmpty()) {
+                    modelSelector.addItem("(no models — check connection)")
+                }
             }
         }
+    }
+
+    // ── Thinking Indicator ────────────────────────────────────────────────
+
+    /** Add an animated "Thinking…" label to the chat panel. */
+    private fun addThinkingIndicator(): JPanel {
+        val label =
+            JLabel("⏳ Thinking…").apply {
+                font = font.deriveFont(Font.ITALIC, 12f)
+                foreground = JBColor.GRAY
+            }
+        val wrapper =
+            JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+                isOpaque = false
+                border = JBUI.Borders.empty(4, 8, 4, 40)
+                add(label)
+            }
+        messagesPanel.add(wrapper)
+        messagesPanel.revalidate()
+        scrollToBottom()
+        return wrapper
+    }
+
+    /** Remove the thinking indicator if it's still showing. */
+    private fun removeThinkingIndicator() {
+        thinkingLabel?.let {
+            messagesPanel.remove(it)
+            messagesPanel.revalidate()
+            messagesPanel.repaint()
+        }
+        thinkingLabel = null
     }
 
     // ── Bubble Rendering ─────────────────────────────────────────────────
