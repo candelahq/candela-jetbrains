@@ -31,11 +31,7 @@ import java.time.Duration
 class ChatClient {
     private val log = Logger.getInstance(ChatClient::class.java)
 
-    private val client =
-        HttpClient
-            .newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .build()
+    private val client = SharedHttpClient.instance
     private val gson = Gson()
 
     companion object {

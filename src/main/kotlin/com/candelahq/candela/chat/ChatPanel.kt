@@ -300,9 +300,11 @@ class ChatPanel(
                                             removeThinkingIndicator()
                                         }
                                     }
-                                    // Throttle UI updates: render at most every STREAM_THROTTLE_MS
+                                    // Adaptive throttle: increase interval as content grows
+                                    val contentLength = streamingContent.length
+                                    val throttleMs = adaptiveThrottleMs(contentLength)
                                     val now = System.currentTimeMillis()
-                                    if (now - lastUiUpdateMs.get() >= STREAM_THROTTLE_MS) {
+                                    if (now - lastUiUpdateMs.get() >= throttleMs) {
                                         lastUiUpdateMs.set(now)
                                         val snapshot = streamingContent.toString()
                                         SwingUtilities.invokeLater {
@@ -672,6 +674,21 @@ class ChatPanel(
         private val log = Logger.getInstance(ChatPanel::class.java)
 
         /** Minimum interval between streaming UI updates (milliseconds). */
-        private const val STREAM_THROTTLE_MS = 80L
+        private const val STREAM_THROTTLE_MIN_MS = 80L
+        private const val STREAM_THROTTLE_MID_MS = 150L
+        private const val STREAM_THROTTLE_MAX_MS = 250L
+        private const val CONTENT_MID_THRESHOLD = 5_000
+        private const val CONTENT_MAX_THRESHOLD = 10_000
+
+        /**
+         * Adaptive throttle: short responses render quickly, long responses
+         * increase the interval to prevent UI lag from markdown re-rendering.
+         */
+        internal fun adaptiveThrottleMs(contentLength: Int): Long =
+            when {
+                contentLength > CONTENT_MAX_THRESHOLD -> STREAM_THROTTLE_MAX_MS
+                contentLength > CONTENT_MID_THRESHOLD -> STREAM_THROTTLE_MID_MS
+                else -> STREAM_THROTTLE_MIN_MS
+            }
     }
 }
