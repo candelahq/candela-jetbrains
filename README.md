@@ -93,7 +93,7 @@ The plugin is built for production reliability with several hardening layers:
 
 - **Structured concurrency** — `CandelaCoroutineService` provides project-scoped coroutine management, ensuring all async work is properly scoped and cancelled on project close.
 - **Stream identity checks** — A monotonic `streamGeneration` counter prevents stale UI callbacks. All callback sites (`onToken`, `onComplete`, `onError`, `CancellationException`) are guarded against out-of-order updates.
-- **Exponential backoff with jitter** — Status bar refresh uses exponential backoff with randomized jitter to handle transient failures gracefully.
+- **Offline backoff** — Status bar refresh uses a fixed 5-minute backoff delay after failed server connections, preventing excessive retries when the server is unreachable.
 - **Error handling** — Network failures surface user-friendly messages with graceful fallback, avoiding silent failures.
 - **121+ tests** — Comprehensive unit test coverage across coroutine lifecycle, streaming, UI state, and error handling.
 
