@@ -38,10 +38,22 @@ class CandleStatusBarWidget(
     StatusBarWidget.TextPresentation {
     companion object {
         const val ID = "CandelaStatusBar"
-        private const val INITIAL_BACKOFF_MS = 30_000L // 30 seconds
-        private const val MAX_BACKOFF_MS = 300_000L // 5 minutes
+        internal const val INITIAL_BACKOFF_MS = 30_000L // 30 seconds
+        internal const val MAX_BACKOFF_MS = 300_000L // 5 minutes
         private const val JITTER_FACTOR = 0.2 // ±20%
         private const val BUDGET_WARNING_COOLDOWN_MS = 30 * 60 * 1000L // 30 minutes
+
+        /**
+         * Calculate backoff delay with exponential increase and random jitter.
+         *
+         * Formula: min(INITIAL * 2^(failures-1), MAX) ± 20% jitter
+         */
+        internal fun calculateBackoff(consecutiveFailures: Int): Long {
+            val exponential = INITIAL_BACKOFF_MS * (1L shl (consecutiveFailures - 1).coerceIn(0, 10))
+            val capped = exponential.coerceAtMost(MAX_BACKOFF_MS)
+            val jitter = (capped * JITTER_FACTOR * (2 * Math.random() - 1)).toLong()
+            return (capped + jitter).coerceAtLeast(INITIAL_BACKOFF_MS / 2)
+        }
     }
 
     private val log = Logger.getInstance(CandleStatusBarWidget::class.java)
@@ -134,18 +146,6 @@ class CandleStatusBarWidget(
                     }
                 }
             }
-    }
-
-    /**
-     * Calculate backoff delay with exponential increase and random jitter.
-     *
-     * Formula: min(INITIAL * 2^(failures-1), MAX) ± 20% jitter
-     */
-    internal fun calculateBackoff(consecutiveFailures: Int): Long {
-        val exponential = INITIAL_BACKOFF_MS * (1L shl (consecutiveFailures - 1).coerceAtMost(10))
-        val capped = exponential.coerceAtMost(MAX_BACKOFF_MS)
-        val jitter = (capped * JITTER_FACTOR * (2 * Math.random() - 1)).toLong()
-        return (capped + jitter).coerceAtLeast(INITIAL_BACKOFF_MS / 2)
     }
 
     /**
