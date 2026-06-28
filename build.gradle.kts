@@ -108,16 +108,22 @@ tasks {
     test {
         useJUnitPlatform()
 
-        // Platform tests boot a full IDE sandbox — these args are required for
-        // headless CI (GitHub Actions) and prevent hangs on display access.
+        // Platform tests boot a full IDE sandbox.
+        // These settings are required for headless CI (GitHub Actions).
         jvmArgs(
             "-Xmx2g",
             "-Xms512m",
-            "-Djava.awt.headless=true",
-            "-Didea.test.cyclic.buffer.size=1048576",
+            "--add-opens=java.base/java.lang=ALL-UNNAMED",
+            "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
+            "--add-opens=java.base/java.io=ALL-UNNAMED",
         )
 
-        // Fail fast: 10 min per test class (platform tests boot IDE sandbox)
+        // Headless mode — prevents JVM from blocking on missing display server.
+        // Set as systemProperty (more reliable than -D jvmArg for forked JVMs).
+        systemProperty("java.awt.headless", "true")
+        systemProperty("idea.test.cyclic.buffer.size", "1048576")
+
+        // Fail fast: don't let a single test class hang forever
         systemProperty("idea.test.timeout.minutes", "5")
     }
 }

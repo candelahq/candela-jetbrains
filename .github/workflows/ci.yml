@@ -78,7 +78,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Run platform tests (JUnit 3 / IDE sandbox)
         run: >-
-          ./gradlew test
+          ./gradlew test --info
           --tests "com.candelahq.candela.settings.CandleSettingsPlatformTest"
           --tests "com.candelahq.candela.actions.CodeContextPlatformTest"
           --tests "com.candelahq.candela.actions.ActionUpdatePlatformTest"
