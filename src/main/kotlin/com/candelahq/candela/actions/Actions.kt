@@ -9,6 +9,11 @@ import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.wm.WindowManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.swing.Swing
 
 class ShowCostSummaryAction : AnAction() {
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
@@ -17,11 +22,15 @@ class ShowCostSummaryAction : AnAction() {
         val project = e.project ?: return
         val settings = CandleSettings.getInstance().state
         val client = CandelaClient(settings.serverUrl)
-        val data = client.getDashboardData()
-        if (data != null) {
-            CandleNotifications.showCostSummary(project, data)
-        } else {
-            CandleNotifications.showOffline(project)
+        CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+            val data = client.getDashboardData()
+            launch(Dispatchers.Swing) {
+                if (data != null) {
+                    CandleNotifications.showCostSummary(project, data)
+                } else {
+                    CandleNotifications.showOffline(project)
+                }
+            }
         }
     }
 }
@@ -33,13 +42,15 @@ class CheckBudgetAction : AnAction() {
         val project = e.project ?: return
         val settings = CandleSettings.getInstance().state
         val client = CandelaClient(settings.serverUrl)
-        val data = client.getDashboardData()
-        if (data?.budget != null) {
-            CandleNotifications.showCostSummary(project, data)
-        } else if (data != null) {
-            CandleNotifications.showCostSummary(project, data)
-        } else {
-            CandleNotifications.showOffline(project)
+        CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+            val data = client.getDashboardData()
+            launch(Dispatchers.Swing) {
+                if (data != null) {
+                    CandleNotifications.showCostSummary(project, data)
+                } else {
+                    CandleNotifications.showOffline(project)
+                }
+            }
         }
     }
 }

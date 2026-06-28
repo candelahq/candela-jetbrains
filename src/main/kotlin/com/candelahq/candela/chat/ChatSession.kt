@@ -2,15 +2,15 @@ package com.candelahq.candela.chat
 
 import com.candelahq.candela.client.ChatMessage
 import com.candelahq.candela.settings.CandleSettings
+import kotlinx.coroutines.Job
 import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Manages the state of a single chat conversation.
  *
  * Thread-safe: [_messages] uses [CopyOnWriteArrayList] for safe concurrent
- * access between EDT and background threads. Streaming state is managed
- * via [cancelled] (AtomicBoolean) and volatile [isStreaming].
+ * access between EDT and background coroutines. Streaming state is managed
+ * via [streamingJob] — cancellation is handled by cancelling the coroutine Job.
  */
 class ChatSession {
     private val _messages = CopyOnWriteArrayList<ChatMessage>()
@@ -18,14 +18,15 @@ class ChatSession {
     /** Immutable snapshot of the conversation history (excludes system prompt). */
     val messages: List<ChatMessage> get() = _messages.toList()
 
-    private val _cancelled = AtomicBoolean(false)
-
-    /** Cancellation flag — set to true to abort a streaming response. */
-    val cancelled: AtomicBoolean get() = _cancelled
-
+    /**
+     * The currently running streaming coroutine, if any.
+     * Set by [ChatPanel] when starting a stream, cancelled to abort.
+     */
     @Volatile
-    var isStreaming: Boolean = false
-        private set
+    var streamingJob: Job? = null
+
+    /** Whether a streaming response is in progress. */
+    val isStreaming: Boolean get() = streamingJob?.isActive == true
 
     fun addUserMessage(content: String) {
         _messages.add(ChatMessage("user", content))
@@ -35,24 +36,15 @@ class ChatSession {
         _messages.add(ChatMessage("assistant", content))
     }
 
-    fun startStreaming() {
-        isStreaming = true
-        _cancelled.set(false)
-    }
-
-    fun stopStreaming() {
-        isStreaming = false
-    }
-
+    /** Cancel the current streaming response (if any). */
     fun cancelStreaming() {
-        _cancelled.set(true)
-        isStreaming = false
+        streamingJob?.cancel()
+        streamingJob = null
     }
 
     fun clear() {
+        cancelStreaming()
         _messages.clear()
-        isStreaming = false
-        _cancelled.set(false)
     }
 
     /**
