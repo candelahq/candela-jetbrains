@@ -107,5 +107,17 @@ intellijPlatform {
 tasks {
     test {
         useJUnitPlatform()
+
+        // Platform tests boot a full IDE sandbox — these args are required for
+        // headless CI (GitHub Actions) and prevent hangs on display access.
+        jvmArgs(
+            "-Xmx2g",
+            "-Xms512m",
+            "-Djava.awt.headless=true",
+            "-Didea.test.cyclic.buffer.size=1048576",
+        )
+
+        // Fail fast: 10 min per test class (platform tests boot IDE sandbox)
+        systemProperty("idea.test.timeout.minutes", "5")
     }
 }
