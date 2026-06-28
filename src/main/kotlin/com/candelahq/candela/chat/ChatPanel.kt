@@ -137,6 +137,7 @@ class ChatPanel(
      */
     fun sendMessage(text: String) {
         if (session.isStreaming) {
+            streamGeneration.incrementAndGet()
             session.cancelStreaming()
         }
         inputArea.text = text
@@ -228,6 +229,7 @@ class ChatPanel(
     private fun doSend() {
         if (session.isStreaming) {
             // Button is in "Stop" mode — cancel the streaming coroutine
+            streamGeneration.incrementAndGet()
             session.cancelStreaming()
             sendButton.text = "Send"
             return
@@ -332,6 +334,7 @@ class ChatPanel(
     }
 
     private fun clearChat() {
+        streamGeneration.incrementAndGet()
         session.cancelStreaming()
         session.clear()
         messagesPanel.removeAll()
