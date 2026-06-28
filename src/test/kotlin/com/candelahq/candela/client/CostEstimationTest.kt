@@ -1,6 +1,7 @@
 package com.candelahq.candela.client
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -104,5 +105,92 @@ class CostEstimationTest {
     fun `format very small cost shows less-than`() {
         assertEquals("<\$0.001", formatCostUsd(0.0005))
         assertEquals("<\$0.001", formatCostUsd(0.0))
+    }
+
+    // ── Locale safety ────────────────────────────────────────────────────
+
+    @Test
+    fun `formatCostUsd uses dot separator regardless of default locale`() {
+        // The Locale.US fix ensures we always get "." not ","
+        val formatted = formatCostUsd(0.0075)
+        assertTrue(formatted.contains("."), "Should use dot separator, got: $formatted")
+        assertFalse(formatted.contains(","), "Should not use comma separator, got: $formatted")
+    }
+
+    // ── Additional model families ────────────────────────────────────────
+
+    @Test
+    fun `deepseek-r1 pricing is correct`() {
+        val usage = ChunkUsage(promptTokens = 5000, completionTokens = 3000, totalTokens = 8000)
+        val cost = usage.estimatedCostUsd("deepseek-r1")
+        assertNotNull(cost)
+        // $0.55/M in, $2.19/M out → (5000*0.55 + 3000*2.19) / 1M = (2750 + 6570) / 1M = 0.00932
+        assertEquals(0.00932, cost!!, 0.0001)
+    }
+
+    @Test
+    fun `mistral-small pricing is correct`() {
+        val usage = ChunkUsage(promptTokens = 2000, completionTokens = 1000, totalTokens = 3000)
+        val cost = usage.estimatedCostUsd("mistral-small-latest")
+        assertNotNull(cost)
+        // $0.20/M in, $0.60/M out → (2000*0.20 + 1000*0.60) / 1M = (400 + 600) / 1M = 0.001
+        assertEquals(0.001, cost!!, 0.0001)
+    }
+
+    // ── Specificity ordering ─────────────────────────────────────────────
+
+    @Test
+    fun `claude-3-haiku matches its own pricing not claude-3`() {
+        val usage = ChunkUsage(promptTokens = 1000, completionTokens = 1000, totalTokens = 2000)
+        val haikuCost = usage.estimatedCostUsd("claude-3-haiku-20240307")
+        val sonnetCost = usage.estimatedCostUsd("claude-3-sonnet-20240229")
+        assertNotNull(haikuCost)
+        assertNotNull(sonnetCost)
+        assertTrue(haikuCost!! < sonnetCost!!, "Haiku should be cheaper than Sonnet")
+    }
+
+    @Test
+    fun `mistral matches generic mistral pricing`() {
+        val usage = ChunkUsage(promptTokens = 1000, completionTokens = 1000, totalTokens = 2000)
+        val cost = usage.estimatedCostUsd("mistral-7b-instruct")
+        assertNotNull(cost, "Should match generic 'mistral' pattern")
+    }
+
+    // ── Edge cases ───────────────────────────────────────────────────────
+
+    @Test
+    fun `empty model string returns null`() {
+        val usage = ChunkUsage(promptTokens = 100, completionTokens = 50, totalTokens = 150)
+        assertNull(usage.estimatedCostUsd(""))
+    }
+
+    @Test
+    fun `input-only tokens priced correctly`() {
+        val usage = ChunkUsage(promptTokens = 1_000_000, completionTokens = 0, totalTokens = 1_000_000)
+        val cost = usage.estimatedCostUsd("gpt-4o")
+        assertNotNull(cost)
+        // 1M tokens at $2.50/M in, 0 out = $2.50
+        assertEquals(2.50, cost!!, 0.01)
+    }
+
+    @Test
+    fun `output-only tokens priced correctly`() {
+        val usage = ChunkUsage(promptTokens = 0, completionTokens = 1_000_000, totalTokens = 1_000_000)
+        val cost = usage.estimatedCostUsd("gpt-4o")
+        assertNotNull(cost)
+        // 0 in, 1M tokens at $10.00/M out = $10.00
+        assertEquals(10.00, cost!!, 0.01)
+    }
+
+    // ── Format boundaries ────────────────────────────────────────────────
+
+    @Test
+    fun `format exactly at 0_001 boundary shows three decimals`() {
+        assertEquals("\$0.001", formatCostUsd(0.001))
+    }
+
+    @Test
+    fun `format exactly at 0_01 boundary shows two decimals`() {
+        assertEquals("\$0.01", formatCostUsd(0.01))
     }
 }
