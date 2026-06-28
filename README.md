@@ -47,6 +47,7 @@ Streaming LLM chat directly in your IDE:
 - **Markdown rendering** — fenced code blocks, inline code, bold, italic, headings, lists
 - **Code block actions** — Copy and Insert at Cursor for generated code
 - **Conversation management** — New Chat button to clear history
+- **Progress indicators** — model loading spinner, thinking indicator, and dashboard fetch status
 
 ### ✏️ Editor Context Actions
 
@@ -58,7 +59,17 @@ Right-click selected code → **Candela**:
 | **Explain Code** | Get an explanation of selected code |
 | **Generate Tests** | Generate unit tests for selected code |
 
-All actions include the file name and language for context.
+All actions send **rich context** to the LLM:
+- File path and language
+- Import statements
+- Enclosing class or function name
+- Selected line range
+
+### ⌨️ Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| <kbd>⌘⇧L</kbd> (macOS) / <kbd>Ctrl+Shift+L</kbd> (Windows/Linux) | Focus the Candela chat window |
 
 ### ⚙️ Settings
 
@@ -73,6 +84,18 @@ Configure under **Settings → Tools → Candela**:
 | Chat server URL | `http://127.0.0.1:1234` | LLM server URL (LM Studio, Ollama, etc.) |
 | System prompt | *(coding assistant)* | Default system prompt for chat |
 | Max tokens | `4096` | Maximum tokens per response |
+
+---
+
+## Architecture & Reliability
+
+The plugin is built for production reliability with several hardening layers:
+
+- **Structured concurrency** — `CandelaCoroutineService` provides project-scoped coroutine management, ensuring all async work is properly scoped and cancelled on project close.
+- **Stream identity checks** — A monotonic `streamGeneration` counter prevents stale UI callbacks. All callback sites (`onToken`, `onComplete`, `onError`, `CancellationException`) are guarded against out-of-order updates.
+- **Exponential backoff with jitter** — Status bar refresh uses exponential backoff with randomized jitter to handle transient failures gracefully.
+- **Error handling** — Network failures surface user-friendly messages with graceful fallback, avoiding silent failures.
+- **121+ tests** — Comprehensive unit test coverage across coroutine lifecycle, streaming, UI state, and error handling.
 
 ---
 
@@ -123,7 +146,7 @@ nix develop -c ./gradlew runIde
 nix develop -c ./gradlew ktlintCheck    # formatting
 nix develop -c ./gradlew detekt          # static analysis
 
-# Run tests (41 tests)
+# Run tests (121+ tests)
 nix develop -c ./gradlew test
 
 # Build the distribution zip
