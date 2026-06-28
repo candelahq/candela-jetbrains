@@ -78,6 +78,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Run platform tests (JUnit 3 / IDE sandbox)
         run: >-
+          xvfb-run --auto-servernum
           ./gradlew test --info
           --tests "com.candelahq.candela.settings.CandleSettingsPlatformTest"
           --tests "com.candelahq.candela.actions.CodeContextPlatformTest"
