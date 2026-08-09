@@ -2,6 +2,28 @@
 
 All notable changes to the Candela JetBrains plugin are documented here.
 
+## v0.2.0 — 2026-08-09
+
+### Smart Replace Selection
+
+- **Replace Selection button**: Code blocks in LLM responses now show "⇄ Replace Selection" when triggered from an editor action, replacing the original selection in-place with `Cmd+Z` undo support
+- **RangeMarker tracking**: Uses IntelliJ's `RangeMarker` API to safely track selection offsets across async document edits — no more stale offset bugs
+- **Thread-safe context**: `AtomicReference<SelectionContext?>` prevents double-click race conditions
+- **Graceful degradation**: Invalid markers fall back to Insert at Cursor instead of erroring
+- **Context persistence**: Selection context persists across code blocks for A/B iteration workflows
+
+### Acceptance Telemetry
+
+- **Structured code block events**: `copy`, `insert`, `replace`, and `replace_fallback` events with code length metrics
+- **Conditional telemetry**: Events only emitted on successful document modification
+- **OTel-ready**: Structured log format ready for forwarding to the Candela proxy's OTel pipeline
+
+### Quality
+
+- **RangeMarker lifecycle**: Proper disposal of abandoned markers in `sendMessage`, `clearChat`, and `dispose`
+- **Button binding fix**: Each Replace button captures its context at creation time, preventing stale references
+- **Platform integration tests**: 5 new tests covering RangeMarker behavior, offset tracking, and edge cases
+
 ## v0.1.1 — 2026-06-27
 
 ### Chat Tool Window
