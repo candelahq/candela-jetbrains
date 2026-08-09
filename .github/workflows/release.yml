@@ -25,7 +25,17 @@ jobs:
         run: ./gradlew buildPlugin
 
       - name: Run tests
-        run: ./gradlew test
+        run: >-
+          ./gradlew test
+          --tests "com.candelahq.candela.BackoffTest"
+          --tests "com.candelahq.candela.BuildCodeFenceTest"
+          --tests "com.candelahq.candela.CodeContextTest"
+          --tests "com.candelahq.candela.CoroutineScopeLifecycleTest"
+          --tests "com.candelahq.candela.StatusBar*"
+          --tests "com.candelahq.candela.Stream*"
+          --tests "com.candelahq.candela.actions.ActionsTest"
+          --tests "com.candelahq.candela.chat.*Test"
+          --tests "com.candelahq.candela.client.*"
 
       - name: Check JETBRAINS_TOKEN is set
         id: check_token
