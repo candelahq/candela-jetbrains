@@ -222,7 +222,7 @@ class ChatPanel(
         text: String,
         context: SelectionContext?,
     ) {
-        selectionContextRef.set(context)
+        selectionContextRef.getAndSet(context)?.dispose()
         sendMessage(text)
     }
 
@@ -232,6 +232,7 @@ class ChatPanel(
         disposed = true
         scope.cancel("ChatPanel disposed")
         session.cancelStreaming()
+        selectionContextRef.getAndSet(null)?.dispose()
         streamingTextPane = null
         ChatPanelService.getInstance(project).panel = null
         log.info("ChatPanel disposed for project: ${project.name}")
@@ -442,7 +443,7 @@ class ChatPanel(
         streamGeneration.incrementAndGet()
         session.cancelStreaming()
         session.clear()
-        selectionContextRef.set(null)
+        selectionContextRef.getAndSet(null)?.dispose()
         messagesPanel.removeAll()
         messagesPanel.revalidate()
         messagesPanel.repaint()
@@ -633,22 +634,25 @@ class ChatPanel(
                     font = font.deriveFont(11f)
                     cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
                     addActionListener {
-                        insertAtCursor(code)
-                        ChatTelemetry.logInsert(code.length)
+                        if (insertAtCursor(code)) {
+                            ChatTelemetry.logInsert(code.length)
+                        }
                     }
                 }
             actionsPanel.add(copyBtn)
             actionsPanel.add(insertBtn)
 
-            // Show "Replace Selection" button when selection context is available
-            if (selectionContextRef.get() != null) {
+            // Show "Replace Selection" button when selection context is available.
+            // Capture the context now so each button stays bound to its response.
+            val capturedCtx = selectionContextRef.get()
+            if (capturedCtx != null) {
                 val replaceBtn =
                     JButton("\u21C4 Replace Selection").apply {
                         isFocusPainted = false
                         font = font.deriveFont(11f)
                         cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
                         addActionListener {
-                            replaceSelection(code)
+                            replaceSelection(code, capturedCtx)
                         }
                     }
                 actionsPanel.add(replaceBtn)
@@ -753,33 +757,36 @@ class ChatPanel(
         }
     }
 
-    private fun insertAtCursor(code: String) {
-        val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return
+    /**
+     * Insert code at the current caret position in the active editor.
+     *
+     * @return `true` if the insert succeeded, `false` if no editor was open.
+     */
+    private fun insertAtCursor(code: String): Boolean {
+        val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return false
         WriteCommandAction.runWriteCommandAction(project, "Insert from Candela Chat", null, {
             val offset = editor.caretModel.offset
             editor.document.insertString(offset, code)
             editor.caretModel.moveToOffset(offset + code.length)
         })
+        return true
     }
 
     /**
      * Replace the original editor selection with LLM-generated code.
      *
-     * Uses the [RangeMarker] from [SelectionContext] to track the selection
-     * bounds across document edits. If the marker has been invalidated
-     * (e.g. the user deleted the entire file), falls back to [insertAtCursor].
+     * Accepts the [SelectionContext] explicitly so each Replace button stays
+     * bound to the context that was active when the response was rendered.
+     * If the marker has been invalidated (e.g. the user deleted the entire
+     * file), falls back to [insertAtCursor].
      *
      * The replacement is wrapped in [WriteCommandAction] so `Cmd+Z` cleanly
      * reverts the change.
      */
-    private fun replaceSelection(code: String) {
-        val ctx = selectionContextRef.get()
-        if (ctx == null) {
-            ChatTelemetry.logReplaceFallback("no_context")
-            insertAtCursor(code)
-            return
-        }
-
+    private fun replaceSelection(
+        code: String,
+        ctx: SelectionContext,
+    ) {
         if (!ctx.marker.isValid) {
             // Graceful degradation: marker invalidated, fall back to insert
             ChatTelemetry.logReplaceFallback("marker_invalid")

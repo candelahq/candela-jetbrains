@@ -15,6 +15,11 @@ import org.junit.jupiter.api.Assertions.assertTrue
  * using a real IntelliJ editor fixture.
  */
 class SmartReplacePlatformTest : CandelaPlatformTestCase() {
+    // "fun hello() { println(\"world\") }"
+    //  0123456789012345678901234567890
+    //                ^              ^
+    //               14             30  (exclusive end)
+
     fun `test captureSelectionContext returns null without selection`() {
         myFixture.configureByText("Test.kt", "fun hello() { println(\"world\") }")
         val editor = myFixture.editor
@@ -26,19 +31,19 @@ class SmartReplacePlatformTest : CandelaPlatformTestCase() {
     fun `test captureSelectionContext captures selection with RangeMarker`() {
         myFixture.configureByText("Test.kt", "fun hello() { println(\"world\") }")
         val editor = myFixture.editor
-        // Select "println("world")" (offset 15 to 31)
-        editor.selectionModel.setSelection(15, 31)
+        // Select "println("world")" (offset 14 to 30, exclusive end)
+        editor.selectionModel.setSelection(14, 30)
         val ctx = captureSelectionContext(editor)
         assertNotNull(ctx)
         assertTrue(ctx!!.marker.isValid)
-        assertEquals(15, ctx.marker.startOffset)
-        assertEquals(31, ctx.marker.endOffset)
+        assertEquals(14, ctx.marker.startOffset)
+        assertEquals(30, ctx.marker.endOffset)
     }
 
     fun `test RangeMarker adjusts when text is inserted above selection`() {
         myFixture.configureByText("Test.kt", "fun hello() { println(\"world\") }")
         val editor = myFixture.editor
-        editor.selectionModel.setSelection(15, 31)
+        editor.selectionModel.setSelection(14, 30)
         val ctx = captureSelectionContext(editor)!!
 
         // Insert text ABOVE the selection
@@ -48,14 +53,14 @@ class SmartReplacePlatformTest : CandelaPlatformTestCase() {
 
         // RangeMarker should have shifted
         assertTrue(ctx.marker.isValid)
-        assertEquals(15 + "// comment\n".length, ctx.marker.startOffset)
-        assertEquals(31 + "// comment\n".length, ctx.marker.endOffset)
+        assertEquals(14 + "// comment\n".length, ctx.marker.startOffset)
+        assertEquals(30 + "// comment\n".length, ctx.marker.endOffset)
     }
 
     fun `test RangeMarker tracks replacement correctly`() {
         myFixture.configureByText("Test.kt", "fun hello() { println(\"world\") }")
         val editor = myFixture.editor
-        editor.selectionModel.setSelection(15, 31)
+        editor.selectionModel.setSelection(14, 30)
         val ctx = captureSelectionContext(editor)!!
 
         // Replace the selection
@@ -77,7 +82,7 @@ class SmartReplacePlatformTest : CandelaPlatformTestCase() {
     fun `test RangeMarker handles full document deletion`() {
         myFixture.configureByText("Test.kt", "fun hello() { println(\"world\") }")
         val editor = myFixture.editor
-        editor.selectionModel.setSelection(15, 31)
+        editor.selectionModel.setSelection(14, 30)
         val ctx = captureSelectionContext(editor)!!
 
         // Delete the entire document

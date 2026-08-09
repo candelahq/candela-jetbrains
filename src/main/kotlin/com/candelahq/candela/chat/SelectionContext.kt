@@ -16,4 +16,12 @@ data class SelectionContext(
     val document: Document,
     /** Range marker that tracks the selection bounds across edits. */
     val marker: RangeMarker,
-)
+) {
+    /**
+     * Release the [RangeMarker] to avoid holding document references
+     * after the context is no longer needed (e.g. on chat clear or panel dispose).
+     */
+    fun dispose() {
+        marker.dispose()
+    }
+}

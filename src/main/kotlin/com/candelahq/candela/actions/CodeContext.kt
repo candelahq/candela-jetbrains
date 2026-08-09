@@ -157,9 +157,11 @@ fun formatContextHeader(ctx: CodeContext): String {
 /**
  * Capture the current editor selection as a [SelectionContext].
  *
- * Creates a greedy [RangeMarker] that expands to include adjacent
- * insertions, ensuring the marker stays valid even if the user
- * types near the selection boundaries while waiting for the LLM.
+ * Creates a [RangeMarker] that is greedy to the right, so insertions
+ * immediately after the selection end are absorbed (useful when the
+ * user types at the end of the selected region). The left boundary
+ * is kept strict so text inserted at the start of the selection
+ * does not widen the replacement range.
  *
  * Returns `null` if there is no active selection.
  */
@@ -171,7 +173,6 @@ fun captureSelectionContext(editor: com.intellij.openapi.editor.Editor): com.can
             editor.selectionModel.selectionEnd,
         )
     marker.isGreedyToRight = true
-    marker.isGreedyToLeft = true
     return com.candelahq.candela.chat
         .SelectionContext(editor.document, marker)
 }
