@@ -31,12 +31,15 @@ class ExplainCodeAction :
         val contextHeader = ctx?.let { "\n${formatContextHeader(it)}\n\n" } ?: "\n\n"
         val message = "Explain this code from `$fileName`:$contextHeader${buildCodeFence(selectedText, lang)}"
 
+        // Capture editor selection for Replace Selection support
+        val selCtx = captureSelectionContext(editor)
+
         val toolWindow =
             ToolWindowManager
                 .getInstance(project)
                 .getToolWindow(ChatToolWindowFactory.TOOL_WINDOW_ID) ?: return
         toolWindow.show {
-            ChatToolWindowFactory.getPanel(project)?.sendMessage(message)
+            ChatToolWindowFactory.getPanel(project)?.sendMessage(message, selCtx)
         }
     }
 

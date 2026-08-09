@@ -153,3 +153,26 @@ fun formatContextHeader(ctx: CodeContext): String {
 
     return parts.joinToString("\n")
 }
+
+/**
+ * Capture the current editor selection as a [SelectionContext].
+ *
+ * Creates a [RangeMarker] that is greedy to the right, so insertions
+ * immediately after the selection end are absorbed (useful when the
+ * user types at the end of the selected region). The left boundary
+ * is kept strict so text inserted at the start of the selection
+ * does not widen the replacement range.
+ *
+ * Returns `null` if there is no active selection.
+ */
+fun captureSelectionContext(editor: com.intellij.openapi.editor.Editor): com.candelahq.candela.chat.SelectionContext? {
+    if (!editor.selectionModel.hasSelection()) return null
+    val marker =
+        editor.document.createRangeMarker(
+            editor.selectionModel.selectionStart,
+            editor.selectionModel.selectionEnd,
+        )
+    marker.isGreedyToRight = true
+    return com.candelahq.candela.chat
+        .SelectionContext(editor.document, marker)
+}
