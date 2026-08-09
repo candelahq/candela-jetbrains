@@ -65,7 +65,11 @@ jobs:
           --tests "com.candelahq.candela.StatusBar*"
           --tests "com.candelahq.candela.Stream*"
           --tests "com.candelahq.candela.actions.ActionsTest"
-          --tests "com.candelahq.candela.chat.*Test"
+          --tests "com.candelahq.candela.chat.AdaptiveThrottleTest"
+          --tests "com.candelahq.candela.chat.ChatDatabaseTest"
+          --tests "com.candelahq.candela.chat.ChatSessionTest"
+          --tests "com.candelahq.candela.chat.MarkdownRendererTest"
+          --tests "com.candelahq.candela.chat.SelectionContextTest"
           --tests "com.candelahq.candela.client.*"
 
   build:
