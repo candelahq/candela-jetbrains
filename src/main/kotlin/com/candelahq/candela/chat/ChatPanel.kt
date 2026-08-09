@@ -624,6 +624,7 @@ class ChatPanel(
                     cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
                     addActionListener {
                         CopyPasteManager.getInstance().setContents(StringSelection(code))
+                        ChatTelemetry.logCopy(code.length)
                     }
                 }
             val insertBtn =
@@ -633,6 +634,7 @@ class ChatPanel(
                     cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
                     addActionListener {
                         insertAtCursor(code)
+                        ChatTelemetry.logInsert(code.length)
                     }
                 }
             actionsPanel.add(copyBtn)
@@ -773,13 +775,14 @@ class ChatPanel(
     private fun replaceSelection(code: String) {
         val ctx = selectionContextRef.get()
         if (ctx == null) {
+            ChatTelemetry.logReplaceFallback("no_context")
             insertAtCursor(code)
             return
         }
 
         if (!ctx.marker.isValid) {
             // Graceful degradation: marker invalidated, fall back to insert
-            log.info("Selection marker invalidated, falling back to insert at cursor")
+            ChatTelemetry.logReplaceFallback("marker_invalid")
             insertAtCursor(code)
             return
         }
@@ -797,9 +800,7 @@ class ChatPanel(
             },
         )
 
-        log.info(
-            "Replace selection: replaced $replacedLength chars with ${code.length} chars",
-        )
+        ChatTelemetry.logReplace(replacedLength, code.length)
     }
 
     private fun escapeBasicHtml(text: String): String =
