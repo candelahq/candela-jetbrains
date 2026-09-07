@@ -1,7 +1,7 @@
 # Candela JetBrains — Development Targets
 #
 # Usage:
-#   make test             — Run all unit tests (fast, no IDE sandbox)
+#   make test             — Run selected safe unit tests (fast, no IDE sandbox)
 #   make platform-test    — Run platform tests (boots full IDE sandbox, ~60s)
 #   make lint             — Run ktlint + detekt
 #   make build            — Build the plugin
