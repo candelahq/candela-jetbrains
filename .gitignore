@@ -2,6 +2,7 @@
 .gradle/
 build/
 out/
+.intellijPlatform/
 
 # IDE
 .idea/
@@ -26,6 +27,7 @@ result-*
 # AI tools
 .opencode.json
 opencode.json
+.agents/
 
 # Plugin distribution (built locally)
 *.zip
