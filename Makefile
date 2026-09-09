@@ -1,7 +1,7 @@
 # Candela JetBrains — Development Targets
 #
 # Usage:
-#   make test             — Run all unit tests (fast, no IDE sandbox)
+#   make test             — Run selected safe unit tests (fast, no IDE sandbox)
 #   make platform-test    — Run platform tests (boots full IDE sandbox, ~60s)
 #   make lint             — Run ktlint + detekt
 #   make build            — Build the plugin
@@ -19,7 +19,11 @@ test:
 		--tests "com.candelahq.candela.StatusBar*" \
 		--tests "com.candelahq.candela.Stream*" \
 		--tests "com.candelahq.candela.actions.ActionsTest" \
-		--tests "com.candelahq.candela.chat.*Test" \
+		--tests "com.candelahq.candela.chat.AdaptiveThrottleTest" \
+		--tests "com.candelahq.candela.chat.ChatDatabaseTest" \
+		--tests "com.candelahq.candela.chat.ChatSessionTest" \
+		--tests "com.candelahq.candela.chat.MarkdownRendererTest" \
+		--tests "com.candelahq.candela.chat.SelectionContextTest" \
 		--tests "com.candelahq.candela.client.*"
 
 # ── Platform Tests (JUnit 3, full IDE sandbox) ────────────────────
@@ -30,7 +34,8 @@ platform-test:
 	./gradlew test \
 		--tests "com.candelahq.candela.settings.CandleSettingsPlatformTest" \
 		--tests "com.candelahq.candela.actions.CodeContextPlatformTest" \
-		--tests "com.candelahq.candela.actions.ActionUpdatePlatformTest"
+		--tests "com.candelahq.candela.actions.ActionUpdatePlatformTest" \
+		--tests "com.candelahq.candela.chat.SmartReplacePlatformTest"
 
 # ── Lint ──────────────────────────────────────────────────────────
 lint:
